@@ -3,12 +3,14 @@ package com.webhtml.app;
 import android.content.Context;
 import android.graphics.Color;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.webkit.WebView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class RefreshHelper extends SwipeRefreshLayout {
 
     private WebView webView;
+    private float startX, startY;
 
     public RefreshHelper(Context context) {
         super(context);
@@ -28,23 +30,36 @@ public class RefreshHelper extends SwipeRefreshLayout {
 
     public void setWebView(WebView webView) {
         this.webView = webView;
-        
-        // STANDARDNO REŠENJE:
-        // Povezujemo zvanični callback koji SwipeRefreshLayout koristi da proveri 
-        // da li WebView (uključujući i njegove unutrašnje skrolabilne elemente) 
-        // može da se pomera nagore.
-        setOnChildScrollUpCallback(new OnChildScrollUpCallback() {
-            @Override
-            public boolean canChildScrollUp(SwipeRefreshLayout parent, android.view.View child) {
-                if (webView != null) {
-                    // canScrollVertically(-1) proverava da li se WebView ili bilo koji 
-                    // njegov unutrašnji element pod prstom/fokusom može pomeriti nagore.
-                    // Ako može, vraćamo true -> SwipeRefreshLayout zna da korisnik skroluje tekst 
-                    // i NIKADA neće prikazati spiner!
-                    return webView.canScrollVertically(-1);
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        switch (ev.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                startX = ev.getX();
+                startY = ev.getY();
+                break;
+
+            case MotionEvent.ACTION_MOVE:
+                float dx = Math.abs(ev.getX() - startX);
+                float dy = Math.abs(ev.getY() - startY);
+
+                // Ako korisnik vuče horizontalno, pusti WebView
+                if (dx > dy) {
+                    return false;
                 }
-                return false;
-            }
-        });
+
+                if (webView != null) {
+                    // KLJUČNO: 
+                    // Ako je WebView skrolovan nadole ILI ako unutrašnji sadržaj pod prstom 
+                    // može da se pomera nagore (što pokriva i unutrašnje tekst-boxove), 
+                    // apsolutno zabranjujemo paljenje pull-to-refresh spinera!
+                    if (webView.getScrollY() > 0 || webView.canScrollVertically(-1)) {
+                        return false;
+                    }
+                }
+                break;
+        }
+        return super.onInterceptTouchEvent(ev);
     }
 }
