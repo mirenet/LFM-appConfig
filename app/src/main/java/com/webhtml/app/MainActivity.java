@@ -20,6 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -61,6 +62,16 @@ public class MainActivity extends AppCompatActivity {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         
         setContentView(refreshHelper);
+
+        // --- OVDE JE DODAT CALLBACK ZA SPREČAVANJE PULL-TO-REFRESH-A KADA JE STRANICA SKROLOVANA ---
+        refreshHelper.setOnChildScrollUpCallback(new SwipeRefreshLayout.OnChildScrollUpCallback() {
+            @Override
+            public boolean canChildScrollUp(SwipeRefreshLayout parent, android.view.View child) {
+                // Vraća true ako je WebView skrolowan nadole, čime sprečava paljenje pull-to-refresh-a
+                return webView.getScrollY() > 0;
+            }
+        });
+        // ------------------------------------------------------------------------------------------
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
