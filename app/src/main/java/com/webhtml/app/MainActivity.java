@@ -50,15 +50,12 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        // Inicijalizujemo naš RefreshHelper koji u sebi enkapsulira i boje, izgled spinera i logiku za skrol
+        // Inicijalizujemo naš novi RefreshHelper (FrameLayout)
         refreshHelper = new RefreshHelper(this);
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#070707"));
         
-        // Povezujemo WebView sa našim helper-om
-        refreshHelper.setWebView(webView);
-
         // Dodajemo WebView unutar RefreshHelper-a preko ViewGroup parametara
         refreshHelper.addView(webView, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -195,7 +192,7 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, url);
                 
                 // Gasimo spiner za pull-to-refresh kada se stranica potpuno učita
-                if (refreshHelper.isRefreshing()) {
+                if (refreshHelper != null) {
                     refreshHelper.setRefreshing(false);
                 }
 
@@ -277,7 +274,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Konfigurisanje akcije za Pull-to-Refresh spiner
+        // Konfigurisanje akcije za naš custom Pull-to-Refresh
         refreshHelper.setOnRefreshListener(() -> {
             webView.reload();
         });
