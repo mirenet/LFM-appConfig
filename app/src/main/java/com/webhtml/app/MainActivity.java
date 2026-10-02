@@ -55,6 +55,10 @@ public class MainActivity extends AppCompatActivity {
         swipeRefreshLayout = new SwipeRefreshLayout(this);
         swipeRefreshLayout.setBackgroundColor(Color.parseColor("#070707"));
 
+        // Podešavanje izgleda spinera da savršeno prati dizajn iz HTML-a
+        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#1a1a1c")); // Pozadina kruga
+        swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#CBD868"));                  // Boja strelice/spinera
+
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#070707"));
         
