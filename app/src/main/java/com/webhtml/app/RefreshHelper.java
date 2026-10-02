@@ -19,6 +19,7 @@ public class RefreshHelper extends FrameLayout {
     private boolean isRefreshing = false;
     private boolean isPulling = false;
     private boolean canPull = false;
+    private long lastTouchUpTime = 0;
     
     private OnRefreshListener refreshListener;
     private ProgressBar progressBar;
@@ -65,27 +66,31 @@ public class RefreshHelper extends FrameLayout {
     }
 
     @Override
-    public boolean dispatchTouchEvent(MotionEvent ev) {
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
         if (isRefreshing) {
-            return super.dispatchTouchEvent(ev);
+            return true;
         }
 
-        switch (ev.getActionMasked()) {
+        int action = ev.getActionMasked();
+
+        switch (action) {
             case MotionEvent.ACTION_DOWN:
                 startY = ev.getY();
                 startX = ev.getX();
                 isPulling = false;
                 
-                // Ključna stvar: Proveravamo da li je WebView uopšte na vrhu u trenutku spuštanja prsta.
-                // Ako je korisnik spustio prst u unutrašnji panel, canScrollVertically(-1) može da zavisi od položaja,
-                // ali glavno je da zapamtimo da li je celo stablo na vrhu.
-                canPull = (webView != null && !webView.canScrollVertically(-1));
+                // Osnovna provera: Da li je WebView na apsolutnom vrhu?
+                // Dodajemo i zaštitni vremenski prozor (300ms) nakon skrolanja panela 
+                // da sprečimo lažni trzaj prsta da okine refresh.
+                boolean isAtTop = (webView != null && !webView.canScrollVertically(-1));
+                boolean timeElapsed = (System.currentTimeMillis() - lastTouchUpTime) > 300;
+                
+                canPull = isAtTop && timeElapsed;
                 break;
 
             case MotionEvent.ACTION_MOVE:
                 if (!canPull) {
-                    // Ako nismo na vrhu, pusti WebView da radi šta hoće, nema govora o refresh-u
-                    return super.dispatchTouchEvent(ev);
+                    return false;
                 }
 
                 float currentY = ev.getY();
@@ -93,16 +98,42 @@ public class RefreshHelper extends FrameLayout {
                 float dy = currentY - startY;
                 float dx = Math.abs(currentX - startX);
 
-                // Ako ide više levo-desno nego gore-dole, ignoriši
+                // Ako je pokret horizontalniji, ne diramo ništa
                 if (dx > Math.abs(dy)) {
-                    return super.dispatchTouchEvent(ev);
+                    return false;
                 }
 
-                // Korisnik mora da vuče strogo nadole (dy > 0) i da smo provereno na vrhu
-                if (dy > 30) {
+                // Samo ako korisnik vuče strogo nadole i nalazimo se na vrhu
+                if (dy > 30 && webView != null && !webView.canScrollVertically(-1)) {
                     isPulling = true;
+                    // Vraćamo true u onInterceptTouchEvent da preuzmemo kontrolu nad gestom
+                    return true;
+                }
+                break;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                lastTouchUpTime = System.currentTimeMillis();
+                canPull = false;
+                break;
+        }
+
+        return super.onInterceptTouchEvent(ev);
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent ev) {
+        if (isRefreshing) {
+            return super.onTouchEvent(ev);
+        }
+
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_MOVE:
+                float currentY = ev.getY();
+                float dy = currentY - startY;
+
+                if (isPulling && dy > 0) {
                     translationY = Math.min((dy - 30) * 0.4f, 300f);
-                    
                     if (webView != null) {
                         webView.setTranslationY(translationY);
                     }
@@ -110,19 +141,15 @@ public class RefreshHelper extends FrameLayout {
                     if (translationY > 100 && progressBar.getVisibility() != View.VISIBLE) {
                         progressBar.setVisibility(View.VISIBLE);
                     }
-
-                    // Dok vučemo nadole za refresh, sprečavamo WebView da prima ovaj pokret
                     return true;
                 }
                 break;
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
-                boolean wasPulling = isPulling;
-                isPulling = false;
-                canPull = false;
-
-                if (wasPulling) {
+                lastTouchUpTime = System.currentTimeMillis();
+                if (isPulling) {
+                    isPulling = false;
                     if (translationY > 150) {
                         startRefreshing();
                     } else {
@@ -133,7 +160,7 @@ public class RefreshHelper extends FrameLayout {
                 break;
         }
 
-        return super.dispatchTouchEvent(ev);
+        return super.onTouchEvent(ev);
     }
 
     private void startRefreshing() {
