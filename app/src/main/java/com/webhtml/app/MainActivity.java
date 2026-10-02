@@ -20,7 +20,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -30,7 +29,7 @@ import java.net.URLDecoder;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout;
+    private RefreshHelper refreshHelper;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -51,22 +50,20 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        // Kreiramo SwipeRefreshLayout kao glavni kontejner koji sadrži spiner za pull-to-refresh
-        swipeRefreshLayout = new SwipeRefreshLayout(this);
-        swipeRefreshLayout.setBackgroundColor(Color.parseColor("#070707"));
-
-        // Podešavanje izgleda spinera da savršeno prati dizajn iz HTML-a
-        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#1a1a1c")); // Pozadina kruga
-        swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#CBD868"));                  // Boja strelice/spinera
+        // Inicijalizujemo naš RefreshHelper koji u sebi enkapsulira i boje, izgled spinera i logiku za skrol
+        refreshHelper = new RefreshHelper(this);
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#070707"));
         
-        // Dodajemo WebView unutar SwipeRefreshLayout-a preko ViewGroup parametara
-        swipeRefreshLayout.addView(webView, new ViewGroup.LayoutParams(
+        // Povezujemo WebView sa našim helper-om
+        refreshHelper.setWebView(webView);
+
+        // Dodajemo WebView unutar RefreshHelper-a preko ViewGroup parametara
+        refreshHelper.addView(webView, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         
-        setContentView(swipeRefreshLayout);
+        setContentView(refreshHelper);
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -198,8 +195,8 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, url);
                 
                 // Gasimo spiner za pull-to-refresh kada se stranica potpuno učita
-                if (swipeRefreshLayout.isRefreshing()) {
-                    swipeRefreshLayout.setRefreshing(false);
+                if (refreshHelper.isRefreshing()) {
+                    refreshHelper.setRefreshing(false);
                 }
 
                 if (url != null && url.startsWith("file://")) {
@@ -281,13 +278,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // Konfigurisanje akcije za Pull-to-Refresh spiner
-        swipeRefreshLayout.setOnRefreshListener(() -> {
+        refreshHelper.setOnRefreshListener(() -> {
             webView.reload();
-        });
-
-        // Sprečavanje aktiviranja pull-to-refresh spirale ako se stranica skroluje niže (samo na vrhu radi)
-        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
-            swipeRefreshLayout.setEnabled(scrollY == 0);
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
