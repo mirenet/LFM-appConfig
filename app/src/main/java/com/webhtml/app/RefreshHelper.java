@@ -11,7 +11,6 @@ public class RefreshHelper extends SwipeRefreshLayout {
 
     private WebView webView;
     private float startX, startY;
-    private boolean isLockedToWebView = false;
 
     public RefreshHelper(Context context) {
         super(context);
@@ -39,24 +38,21 @@ public class RefreshHelper extends SwipeRefreshLayout {
             case MotionEvent.ACTION_DOWN:
                 startX = ev.getX();
                 startY = ev.getY();
-                isLockedToWebView = false;
                 break;
 
             case MotionEvent.ACTION_MOVE:
                 float dx = Math.abs(ev.getX() - startX);
                 float dy = Math.abs(ev.getY() - startY);
 
-                // Ako je pomeranje više horizontalno nego vertikalno, pusti WebView
+                // Ako je pokret više horizontalan, ignoriši
                 if (dx > dy) {
-                    return super.onInterceptTouchEvent(ev);
+                    return false;
                 }
 
                 if (webView != null) {
-                    // Ključna GitHub fora: 
-                    // Pitamo WebView da li se sadržaj u njemu pomera ili može da se skroluje nagore.
-                    // Ako je korisnik unutar panela i skroluje, canScrollVertically(-1) vraća true.
+                    // Ako se unutrašnji sadržaj pod prstom može pomerati nagore 
+                    // (što pokriva tvoj panel sa tekstom), apsolutno gasimo SwipeRefreshLayout!
                     if (webView.canScrollVertically(-1)) {
-                        // Sprečavamo SwipeRefreshLayout da presretne gest!
                         return false; 
                     }
                 }
