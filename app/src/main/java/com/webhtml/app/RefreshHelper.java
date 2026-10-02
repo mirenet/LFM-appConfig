@@ -44,15 +44,18 @@ public class RefreshHelper extends SwipeRefreshLayout {
                 float dx = Math.abs(ev.getX() - startX);
                 float dy = Math.abs(ev.getY() - startY);
 
-                // Ako je pokret više horizontalan, ignoriši
+                // Ako korisnik vuče horizontalno, pusti WebView
                 if (dx > dy) {
                     return false;
                 }
 
                 if (webView != null) {
-                    // Ako se unutrašnji sadržaj pod prstom može pomerati nagore 
-                    // (što pokriva tvoj panel sa tekstom), apsolutno gasimo SwipeRefreshLayout!
+                    // KLJUČNA PROVERA: 
+                    // Ako WebView ima mogućnost skrola nagore (što znači da je ili stranica 
+                    // pomerena nadole, ILI se prst nalazi unutar unutrašnjeg panela/teksta 
+                    // koji se skroluje), apsolutno zabranjujemo SwipeRefreshLayout-u da preotme gest!
                     if (webView.canScrollVertically(-1)) {
+                        // Vraćanjem false ovde sprečavamo roditelja da aktivira spiner
                         return false; 
                     }
                 }
