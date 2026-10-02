@@ -3,9 +3,11 @@ package com.webhtml.app;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JsResult;
@@ -18,6 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -27,6 +30,7 @@ import java.net.URLDecoder;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -47,9 +51,18 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
+        // Kreiramo SwipeRefreshLayout kao glavni kontejner koji sadrži spiner za pull-to-refresh
+        swipeRefreshLayout = new SwipeRefreshLayout(this);
+        swipeRefreshLayout.setBackgroundColor(Color.parseColor("#070707"));
+
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#070707"));
-        setContentView(webView);
+        
+        // Dodajemo WebView unutar SwipeRefreshLayout-a preko ViewGroup parametara
+        swipeRefreshLayout.addView(webView, new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        
+        setContentView(swipeRefreshLayout);
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -73,6 +86,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Registrujemo DownloadHelper kao JavaScript Bridge
         webView.addJavascriptInterface(downloadHelper, "AndroidBridge");
+
+        // Zaključavanje orijentacije na portret po potrebi
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
 
         // Moderno upravljanje dugmetom nazad (OnBackPressedDispatcher)
         getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
@@ -139,7 +155,7 @@ public class MainActivity extends AppCompatActivity {
                     return false; 
                 }
                 
-                // 2. Ako je intent:// link, parsiraj ga i pokreni spoljnu aplikaciju (NewPipe, itd.)
+                // 2. Ako je intent:// link, parsiraj ga i pokreni spoljnu aplikaciju
                 if (url.startsWith("intent://")) {
                     try {
                         Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
@@ -176,6 +192,12 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                
+                // Gasimo spiner za pull-to-refresh kada se stranica potpuno učita
+                if (swipeRefreshLayout.isRefreshing()) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
@@ -252,6 +274,16 @@ public class MainActivity extends AppCompatActivity {
                 
                 return super.shouldInterceptRequest(view, request);
             }
+        });
+
+        // Konfigurisanje akcije za Pull-to-Refresh spiner
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            webView.reload();
+        });
+
+        // Sprečavanje aktiviranja pull-to-refresh spirale ako se stranica skroluje niže (samo na vrhu radi)
+        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            swipeRefreshLayout.setEnabled(scrollY == 0);
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
