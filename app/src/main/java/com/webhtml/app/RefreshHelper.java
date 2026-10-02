@@ -14,9 +14,10 @@ public class RefreshHelper extends FrameLayout {
 
     private WebView webView;
     private float startY;
+    private float startX;
     private float translationY = 0;
     private boolean isRefreshing = false;
-    private boolean canPull = false;
+    private boolean isPulling = false;
     
     private OnRefreshListener refreshListener;
     private ProgressBar progressBar;
@@ -38,7 +39,6 @@ public class RefreshHelper extends FrameLayout {
     private void init(Context context) {
         setBackgroundColor(Color.parseColor("#070707"));
 
-        // Kreiramo jednostavan indikator (spiner) koji će se pojaviti pri vrhu
         progressBar = new ProgressBar(context);
         LayoutParams pbParams = new LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -48,7 +48,6 @@ public class RefreshHelper extends FrameLayout {
         pbParams.topMargin = 40;
         progressBar.setLayoutParams(pbParams);
         progressBar.setVisibility(View.GONE);
-        // Možeš prilagoditi boju ako želiš, ili ostaviti standardnu
         addView(progressBar);
     }
 
@@ -65,60 +64,74 @@ public class RefreshHelper extends FrameLayout {
     }
 
     @Override
-    public boolean onInterceptTouchEvent(MotionEvent ev) {
-        if (isRefreshing) return true;
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (isRefreshing) {
+            return super.dispatchTouchEvent(ev);
+        }
 
-        switch (ev.getAction()) {
+        switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 startY = ev.getY();
-                canPull = (webView != null && !webView.canScrollVertically(-1));
+                startX = ev.getX();
+                isPulling = false;
                 break;
 
             case MotionEvent.ACTION_MOVE:
-                float dy = ev.getY() - startY;
-                // Ako korisnik vuče nadole, a WebView je na apsolutnom vrhu (nema unutrašnjeg skrola nagore)
-                if (canPull && dy > 0 && webView != null && !webView.canScrollVertically(-1)) {
-                    // Presrećemo dodir i preuzimamo kontrolu nad povlačenjem
-                    return true;
+                float currentY = ev.getY();
+                float currentX = ev.getX();
+                float dy = currentY - startY;
+                float dx = Math.abs(currentX - startX);
+
+                // Ako je korisnik krenuo više horizontalno nego vertikalno, ne diramo ništa
+                if (dx > Math.abs(dy)) {
+                    break;
                 }
-                break;
-        }
-        return super.onInterceptTouchEvent(ev);
-    }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (isRefreshing) return super.onTouchEvent(event);
-
-        switch (event.getAction()) {
-            case MotionEvent.ACTION_MOVE:
-                float dy = event.getY() - startY;
-                if (canPull && dy > 0) {
-                    // Ograničavamo maksimalno povlačenje da ne ide unedogled
-                    translationY = Math.min(dy * 0.4f, 300f);
-                    if (webView != null) {
+                // Uslov za povlačenje:
+                // 1. Vuče nadole (dy > 0)
+                // 2. WebView uopšte ne može da se skroluje nagore (na vrhu je)
+                // 3. Nismo u sred unutrašnjeg skrola nekog drugog elementa
+                if (dy > 0 && webView != null && !webView.canScrollVertically(-1)) {
+                    // Ako je pomeraj veći od minimalnog praga, preuzimamo gest
+                    if (dy > 20 || isPulling) {
+                        isPulling = true;
+                        
+                        // Skaliramo pomeraj da ide glatko uz blagi otpor
+                        translationY = Math.min((dy - 20) * 0.4f, 300f);
                         webView.setTranslationY(translationY);
+
+                        if (translationY > 100 && progressBar.getVisibility() != View.VISIBLE) {
+                            progressBar.setVisibility(View.VISIBLE);
+                        }
+
+                        // Vraćamo true da sprečimo WebView da primi ovaj pokret povlačenja nadole
+                        // i pretvorimo ga u naš pull-to-refresh efekat
+                        return true;
                     }
-                    if (translationY > 100 && progressBar.getVisibility() != View.VISIBLE) {
-                        progressBar.setVisibility(View.VISIBLE);
+                } else {
+                    // Ako je korisnik krenuo nagore ili je WebView u sred skrola, 
+                    // vraćamo poziciju u nulu ako je bila pomerena
+                    if (translationY > 0) {
+                        resetPosition();
                     }
-                    return true;
                 }
                 break;
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
-                if (translationY > 150) {
-                    // Pokrećemo osvežavanje
-                    startRefreshing();
-                } else {
-                    // Vraćamo nazad glatko
-                    resetPosition();
+                if (isPulling) {
+                    isPulling = false;
+                    if (translationY > 150) {
+                        startRefreshing();
+                    } else {
+                        resetPosition();
+                    }
+                    return true;
                 }
-                canPull = false;
                 break;
         }
-        return super.onTouchEvent(event);
+
+        return super.dispatchTouchEvent(ev);
     }
 
     private void startRefreshing() {
