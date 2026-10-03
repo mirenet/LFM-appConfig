@@ -179,48 +179,70 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // INJEKCIJA PULL-TO-REFRESH SKRIPTE (Kao u Soul/Via brauzeru)
+                // INJEKCIJA PULL-TO-REFRESH SKRIPTE SA PRAĆENJEM PRSTA
                 String injectionScript = "(function() {" +
                         "  if (!document.getElementById('native-ptr-style')) {" +
                         "    var style = document.createElement('style');" +
                         "    style.id = 'native-ptr-style';" +
-                        "    style.innerHTML = '#ptr-spinner { position: fixed; top: -50px; left: 50%; transform: translateX(-50%); width: 40px; height: 40px; background: #1F1F1F; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; transition: top 0.2s ease; z-index: 99999; } " +
-                        "                       #ptr-spinner.visible { top: 20px; } " +
-                        "                       #ptr-spinner .ptr-icon { width: 20px; height: 20px; border: 2px solid #FFF; border-top-color: transparent; border-radius: 50%; animation: ptr-spin 0.8s linear infinite; } " +
+                        "    style.innerHTML = '#ptr-container { position: fixed; top: -60px; left: 0; width: 100%%; height: 60px; display: flex; align-items: center; justify-content: center; z-index: 99999; transition: transform 0.2s ease; pointer-events: none; } ' +" +
+                        "                       #ptr-spinner { width: 36px; height: 36px; background: #1F1F1F; border-radius: 50%%; box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; } ' +" +
+                        "                       #ptr-spinner .ptr-icon { width: 18px; height: 18px; border: 2px solid #FFF; border-top-color: transparent; border-radius: 50%%; animation: ptr-spin 0.8s linear infinite; } ' +" +
                         "                       @keyframes ptr-spin { to { transform: rotate(360deg); } }';" +
                         "    document.head.appendChild(style);" +
                         "  }" +
-                        "  if (!document.getElementById('ptr-spinner')) {" +
+                        "  if (!document.getElementById('ptr-container')) {" +
                         "    var div = document.createElement('div');" +
-                        "    div.id = 'ptr-spinner';" +
-                        "    div.innerHTML = '<div class=\"ptr-icon\"></div>';" +
+                        "    div.id = 'ptr-container';" +
+                        "    div.innerHTML = '<div id=\"ptr-spinner\"><div class=\"ptr-icon\"></div></div>';" +
                         "    document.body.appendChild(div);" +
                         "  }" +
                         "  if (!window.hasPtrInitialized) {" +
                         "    window.hasPtrInitialized = true;" +
-                        "    let startY = 0, refreshing = false;" +
-                        "    window.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, {passive: true});" +
+                        "    let startY = 0, pulling = false, refreshing = false;" +
+                        "    const container = document.getElementById('ptr-container');" +
+                        "" +
+                        "    window.addEventListener('touchstart', e => {" +
+                        "      if (window.scrollY <= 2) {" +
+                        "        startY = e.touches[0].clientY;" +
+                        "        pulling = true;" +
+                        "      } else {" +
+                        "        pulling = false;" +
+                        "      }" +
+                        "    }, {passive: true});" +
+                        "" +
                         "    window.addEventListener('touchmove', e => {" +
-                        "      if (refreshing) return;" +
-                        "      let diff = e.touches[0].clientY - startY;" +
-                        "      if (diff > 60) {" +
+                        "      if (!pulling || refreshing) return;" +
+                        "      let currentY = e.touches[0].clientY;" +
+                        "      let diff = currentY - startY;" +
+                        "" +
+                        "      if (diff > 0 && window.scrollY <= 2) {" +
                         "        let el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);" +
                         "        let canRefresh = true;" +
                         "        while (el && el !== document.body && el !== document.documentElement) {" +
                         "          let style = window.getComputedStyle(el);" +
                         "          let overflowY = style.getPropertyValue('overflow-y');" +
                         "          if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {" +
-                        "            if (el.scrollTop > 5) { canRefresh = false; break; }" +
+                        "            if (el.scrollTop > 2) { canRefresh = false; break; }" +
                         "          }" +
                         "          el = el.parentElement;" +
                         "        }" +
-                        "        if (window.scrollY > 5) canRefresh = false;" +
                         "        if (canRefresh) {" +
-                        "          refreshing = true;" +
-                        "          document.getElementById('ptr-spinner').classList.add('visible');" +
-                        "          setTimeout(() => { window.location.reload(); }, 400);" +
+                        "          let pullDist = Math.min(diff * 0.4, 80);" +
+                        "          container.style.transform = 'translateY(' + pullDist + 'px)';" +
+                        "          if (pullDist >= 70) {" +
+                        "            refreshing = true;" +
+                        "            container.style.transform = 'translateY(70px)';" +
+                        "            setTimeout(() => { window.location.reload(); }, 300);" +
+                        "          }" +
                         "        }" +
                         "      }" +
+                        "    }, {passive: true});" +
+                        "" +
+                        "    window.addEventListener('touchend', () => {" +
+                        "      if (!refreshing) {" +
+                        "        container.style.transform = 'translateY(0px)';" +
+                        "      }" +
+                        "      pulling = false;" +
                         "    }, {passive: true});" +
                         "  }" +
                         "})();";
