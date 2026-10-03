@@ -21,8 +21,6 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
 
-import org.json.JSONObject;
-
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -46,8 +44,8 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback pendingGeolocationCallback;
     private PermissionRequest pendingPermissionRequest;
 
-    // Konfiguracija učitana iz appConfig-a
-    private boolean isRefreshEnabledInConfig = true;
+    // Sadržaj appConfig.js fajla pročitan iz assets-a
+    private String appConfigJsContent = "";
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -57,8 +55,8 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
 
-        // 1. Učitavamo konfiguraciju iz appConfig.json (ili sličnog fajla) u assets folderu
-        loadAppConfig();
+        // 1. Čitamo appConfig.js iz assets foldera
+        loadAppConfigJs();
         
         // 2. Kreiramo čisti WebView preko celog ekrana
         webView = new WebView(this);
@@ -190,12 +188,11 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Ako je u appConfig-u refresh isključen, ne ubacujemo skriptu
-                if (!isRefreshEnabledInConfig) return;
-
-                // Robustna Pull-to-Refresh skripta sa potpunim praćenjem unutrašnjih panela i touch release-a
-                String robustPtrScript = 
+                // Injektujemo appConfig.js i pull-to-refresh logiku koja ga poštuje
+                String combinedScript = 
                     "(function() {" +
+                    "    try { " + appConfigJsContent + " } catch(e) {}" +
+                    "    if (typeof AppConfig !== 'undefined' && AppConfig.refresh === false) return;" +
                     "    if (window._ptrInitialized) return;" +
                     "    window._ptrInitialized = true;" +
                     "    " +
@@ -271,7 +268,7 @@ public class MainActivity extends AppCompatActivity {
                     "    }, {passive: true});" +
                     "})();";
 
-                view.evaluateJavascript(robustPtrScript, null);
+                view.evaluateJavascript(combinedScript, null);
             }
             
             @Override
@@ -438,27 +435,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Pomoćna metoda za čitanje konfiguracije iz assets foldera
-    private void loadAppConfig() {
+    // Pomoćna metoda za čitanje appConfig.js iz assets foldera
+    private void loadAppConfigJs() {
         try {
             AssetManager assetManager = getAssets();
-            InputStream is = assetManager.open("appConfig.json"); // Prilagodi naziv fajla ako se drugačije zove u assets
+            InputStream is = assetManager.open("appConfig.js");
             BufferedReader reader = new BufferedReader(new InputStreamReader(is));
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
-                sb.append(line);
+                sb.append(line).append("\n");
             }
             reader.close();
-
-            JSONObject configJson = new JSONObject(sb.toString());
-            // Proveravamo polje za refresh u konfiguraciji (prilagodi ključ nazivu u tvom json-u)
-            if (configJson.has("enableRefresh")) {
-                isRefreshEnabledInConfig = configJson.getBoolean("enableRefresh");
-            }
+            appConfigJsContent = sb.toString();
         } catch (Exception e) {
-            // Ako fajl ne postoji ili je drugačijeg formata, podrazumevamo da je dozvoljeno ili zadržavamo default
-            isRefreshEnabledInConfig = true;
+            appConfigJsContent = "const AppConfig = { refresh: true };";
         }
     }
 
