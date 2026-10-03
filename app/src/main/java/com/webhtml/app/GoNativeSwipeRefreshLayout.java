@@ -655,15 +655,24 @@ public class GoNativeSwipeRefreshLayout extends ViewGroup implements NestedScrol
      * @return Whether it is possible for the child view of this layout to
      *         scroll up. Override this if the child view is a custom view.
      */
-    public boolean canChildScrollUp() {
-        if (mChildScrollUpCallback != null) {
-            return mChildScrollUpCallback.canChildScrollUp(this, mTarget);
-        }
-        if (mTarget instanceof ListView) {
-            return ListViewCompat.canScrollList((ListView) mTarget, -1);
-        }
-        return mTarget.canScrollVertically(-1);
+    @Override
+public boolean canChildScrollUp() {
+    if (mChildScrollUpCallback != null) {
+        return mChildScrollUpCallback.canChildScrollUp(this, mTarget);
     }
+    if (mTarget instanceof ListView) {
+        return ListViewCompat.canScrollList((ListView) mTarget, -1);
+    }
+    if (mTarget instanceof WebView) {
+        // WebView nativni skrol ili provera preko getScrollY
+        WebView webView = (WebView) mTarget;
+        if (webView.getScrollY() > 0) {
+            return true;
+        }
+    }
+    // Standardna provera za sve ostale poglede, uz sigurnosnu proveru za WebView
+    return mTarget.canScrollVertically(-1);
+}
     
     /**
      * Set a callback to override {@link GoNativeSwipeRefreshLayout#canChildScrollUp()} method. Non-null
