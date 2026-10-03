@@ -1,17 +1,15 @@
 package com.webhtml.app;
 
-import android.view.ViewGroup;
-import android.widget.LinearLayout;
-import com.webhtml.app.R;
-
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -28,6 +26,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
+import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -45,6 +44,22 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback pendingGeolocationCallback;
     private PermissionRequest pendingPermissionRequest;
 
+    // JavaScript Bridge klasa za kontrolu SwipeRefreshLayout-a iz HTML/JS panela
+    public static class SwipeBridge {
+        private final SwipeRefreshLayout swipeLayout;
+
+        public SwipeBridge(SwipeRefreshLayout swipeLayout) {
+            this.swipeLayout = swipeLayout;
+        }
+
+        @JavascriptInterface
+        public void setSwipeEnabled(final boolean enabled) {
+            if (swipeLayout != null) {
+                swipeLayout.post(() -> swipeLayout.setEnabled(enabled));
+            }
+        }
+    }
+
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,14 +68,14 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        // Dinamički kreiramo SwipeRefreshLayout kao glavni kontejner preko celog ekrana
+        // 1. Dinamički kreiramo SwipeRefreshLayout kao glavni kontejner preko celog ekrana
         swipeRefreshLayout = new SwipeRefreshLayout(this);
         swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        // Dinamički kreiramo WebView
+        // 2. Dinamički kreiramo WebView
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -68,13 +83,11 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        // Ubacujemo WebView unutar SwipeRefreshLayout-a
+        // 3. Ubacujemo WebView unutar SwipeRefreshLayout-a i postavljamo kao UI
         swipeRefreshLayout.addView(webView);
-
-        // Postavljamo SwipeRefreshLayout kao glavni sadržaj aktivnosti (bez XML fajla!)
         setContentView(swipeRefreshLayout);
 
-        // Podešavanje Pull-to-Refresh listener-a
+        // Podešavanje Pull-to-Refresh listener-a (osvežavanje cele stranice)
         swipeRefreshLayout.setOnRefreshListener(() -> {
             webView.reload();
         });
@@ -99,8 +112,9 @@ public class MainActivity extends AppCompatActivity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-        // Registrujemo DownloadHelper kao JavaScript Bridge
+        // Registrujemo DownloadHelper i SwipeBridge kao JavaScript Bridge
         webView.addJavascriptInterface(downloadHelper, "AndroidBridge");
+        webView.addJavascriptInterface(new SwipeBridge(swipeRefreshLayout), "SwipeControlBridge");
 
         // Moderno upravljanje dugmetom nazad (OnBackPressedDispatcher)
         getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
@@ -171,7 +185,6 @@ public class MainActivity extends AppCompatActivity {
                         Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
                         if (intent != null) {
                             intent.addCategory(Intent.CATEGORY_BROWSABLE);
-                            
                             try {
                                 startActivity(intent);
                                 return true;
@@ -183,9 +196,7 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             }
                         }
-                    } catch (Exception e) {
-                        // Greška pri parsiranju
-                    }
+                    } catch (Exception e) {}
                     return true;
                 }
 
@@ -201,13 +212,44 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // Sakrij kružić kada se stranica učita
+                
+                // Sakrij kružić za osvežavanje kada se stranica učita
                 if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
                     swipeRefreshLayout.setRefreshing(false);
                 }
+
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
+
+                // Ubacujemo pametnu skriptu koja detektuje unutrašnje skrolabilne elemente (overflow paneli)
+                String jsInjection = 
+                    "window.addEventListener('touchstart', function(e) {" +
+                    "    let el = e.target;" +
+                    "    let canScroll = false;" +
+                    "    while (el && el !== document.body && el !== document.documentElement) {" +
+                    "        let style = window.getComputedStyle(el);" +
+                    "        let overflowY = style.getPropertyValue('overflow-y');" +
+                    "        if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {" +
+                    "            if (el.scrollTop > 0) {" +
+                    "                canScroll = true;" +
+                    "                break;" +
+                    "            }" +
+                    "        }" +
+                    "        el = el.parentElement;" +
+                    "    }" +
+                    "    if (canScroll) {" +
+                    "        window.SwipeControlBridge.setSwipeEnabled(false);" +
+                    "    } else {" +
+                    "        window.SwipeControlBridge.setSwipeEnabled(true);" +
+                    "    }" +
+                    "}, {passive: true});" +
+                    
+                    "window.addEventListener('touchend', function() {" +
+                    "    window.SwipeControlBridge.setSwipeEnabled(true);" +
+                    "}, {passive: true});";
+
+                view.evaluateJavascript(jsInjection, null);
             }
             
             @Override
@@ -275,16 +317,13 @@ public class MainActivity extends AppCompatActivity {
 
                     return new WebResourceResponse(mimeType.split(";")[0].trim(), encoding, inputStream);
 
-                } catch (Exception e) {
-                    // Fallback
-                }
+                } catch (Exception e) {}
                 
                 return super.shouldInterceptRequest(view, request);
             }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
-
             @Override
             public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
                 DialogHelper.showCustomAlert(MainActivity.this, message, result);
@@ -316,7 +355,7 @@ public class MainActivity extends AppCompatActivity {
                     if (resource.equals(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) needsAudio = true;
                 }
 
-                java.util.ArrayList<String> permissionsToRequest = new java.util.ArrayList<>();
+                ArrayList<String> permissionsToRequest = new ArrayList<>();
                 if (needsCamera && androidx.core.content.ContextCompat.checkSelfPermission(MainActivity.this, 
                         android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     permissionsToRequest.add(android.Manifest.permission.CAMERA);
@@ -361,6 +400,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // Provera intenta pri pokretanju
         Intent intent = getIntent();
         Uri data = intent != null ? intent.getData() : null;
 
@@ -442,8 +482,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (webView != null) {
-            if (webView.getParent() instanceof android.view.ViewGroup) {
-                ((android.view.ViewGroup) webView.getParent()).removeView(webView);
+            if (webView.getParent() instanceof ViewGroup) {
+                ((ViewGroup) webView.getParent()).removeView(webView);
             }
             webView.removeAllViews();
             webView.destroy();
