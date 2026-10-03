@@ -7,7 +7,6 @@ import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -47,7 +46,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String appConfigJsContent = "";
 
-    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded", "ClickableViewAccessibility"})
+    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
@@ -57,7 +56,7 @@ public class MainActivity extends AppCompatActivity {
 
         loadAppConfigJs();
         
-        // 1. Kreiramo samo čist WebView preko celog ekrana (NEMA SwipeRefreshLayout-a!)
+        // 1. Kreiramo čist WebView preko celog ekrana
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -65,66 +64,18 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        // 2. Postavljamo WebView kao glavni sadržaj aktivnosti
+        // 2. Postavljamo ga kao sadržaj aktivnosti
         setContentView(webView);
 
-        // 3. Inicijalizujemo RefreshBridge
-        refreshBridge = new RefreshBridge();
-        webView.addJavascriptInterface(refreshBridge, "RefreshBridge");
-
-        // 4. Nativna kontrola dodira direktno nad WebView-om (Nema svađe oko dodira!)
-        final float[] startY = {0f};
-        final boolean[] isPullingDown = {false};
-        
-        // Izračunavamo prag (npr. 40% visine ekrana, isto kao što smo hteli)
-        int screenHeight = getResources().getDisplayMetrics().heightPixels;
-        int triggerDistance = (int) (screenHeight * 0.4);
-
-        webView.setOnTouchListener((v, event) -> {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    startY[0] = event.getY();
-                    isPullingDown[0] = false;
-                    break;
-                    
-                case MotionEvent.ACTION_MOVE:
-                    float currentY = event.getY();
-                    float diff = currentY - startY[0];
-                    
-                    // Dozvoljavamo povlačenje SAMO ako:
-                    // 1. Vučemo nadole (diff > 0)
-                    // 2. Je WebView na samom vrhu (webView.getScrollY() == 0)
-                    // 3. Su i unutrašnji elementi na vrhu (refreshBridge.isAtTop())
-                    if (diff > 0 && webView.getScrollY() == 0 && refreshBridge.isAtTop()) {
-                        isPullingDown[0] = true;
-                        
-                        // Ako je korisnik prešao prag od 40% visine ekrana
-                        if (diff > triggerDistance) {
-                            // Resetujemo stanje da se ne okida više puta tokom istog povlačenja
-                            startY[0] = currentY; 
-                            isPullingDown[0] = false;
-                            
-                            // Proveravamo AppConfig i osvežavamo stranicu
-                            webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
-                                if (!"false".equals(value)) {
-                                    webView.reload();
-                                }
-                            });
-                        }
-                    } else {
-                        isPullingDown[0] = false;
-                    }
-                    break;
-                    
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    isPullingDown[0] = false;
-                    break;
-            }
-            
-            // Vratimo FALSE da WebView i daljenormalno obrađuje skrolovanje i klikove!
-            return false;
+        // 3. Inicijalizujemo RefreshBridge preko kojeg JS poziva osvežavanje
+        refreshBridge = new RefreshBridge(() -> {
+            webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
+                if (!"false".equals(value)) {
+                    webView.reload();
+                }
+            });
         });
+        webView.addJavascriptInterface(refreshBridge, "RefreshBridge");
 
         downloadHelper = new DownloadHelper(this);
 
@@ -245,40 +196,95 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                String refreshBridgeJs = 
+                // Moćna In-Web Pull-to-Refresh skripta sa vizuelnim spinerom
+                String pullToRefreshJs = 
                     "(function() {" +
-                    "    window.addEventListener('scroll', function() {" +
+                    "    if (window.hasPullToRefreshInitialized) return;" +
+                    "    window.hasPullToRefreshInitialized = true;" +
+                    "" +
+                    "    let startY = 0;" +
+                    "    let currentY = 0;" +
+                    "    let pulling = false;" +
+                    "    let threshold = 120;" + // Prag u pikselima za okidanje osvežavanja
+                    "" +
+                    "    // Kreiramo vizuelni element za spiner/indikator" +
+                    "    let indicator = document.createElement('div');" +
+                    "    indicator.id = 'native-ptr-indicator';" +
+                    "    indicator.style.position = 'fixed';" +
+                    "    indicator.style.top = '-50px';" +
+                    "    indicator.style.left = '50%';" +
+                    "    indicator.style.transform = 'translateX(-50%)';" +
+                    "    indicator.style.width = '36px';" +
+                    "    indicator.style.height = '36px';" +
+                    "    indicator.style.borderRadius = '50%';" +
+                    "    indicator.style.backgroundColor = '#1e1e1e';" +
+                    "    indicator.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';" +
+                    "    indicator.style.border = '2px solid #333';" +
+                    "    indicator.style.borderTopColor = '#3b82f6';" +
+                    "    indicator.style.transition = 'top 0.2s ease';" +
+                    "    indicator.style.zIndex = '999999';" +
+                    "    indicator.style.display = 'flex';" +
+                    "    indicator.style.alignItems = 'center';" +
+                    "    indicator.style.justifyContent = 'center';" +
+                    "    document.body.appendChild(indicator);" +
+                    "" +
+                    "    window.addEventListener('touchstart', function(e) {" +
                     "        let scrollTop = window.pageYOffset || document.documentElement.scrollTop;" +
-                    "        if (window.RefreshBridge && typeof window.RefreshBridge.setScrollAtTop === 'function') {" +
-                    "            window.RefreshBridge.setScrollAtTop(scrollTop <= 0);" +
+                    "        if (scrollTop === 0) {" +
+                    "            startY = e.touches[0].clientY;" +
+                    "            pulling = true;" +
+                    "        } else {" +
+                    "            pulling = false;" +
                     "        }" +
                     "    }, {passive: true});" +
                     "" +
-                    "    window.addEventListener('touchstart', function(e) {" +
-                    "        let el = e.target;" +
-                    "        let canScrollUp = false;" +
-                    "        while (el && el !== document.body && el !== document.documentElement) {" +
-                    "            let style = window.getComputedStyle(el);" +
-                    "            let overflowY = style.getPropertyValue('overflow-y');" +
-                    "            if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollTop > 0) {" +
-                    "                canScrollUp = true;" +
-                    "                break;" +
+                    "    window.addEventListener('touchmove', function(e) {" +
+                    "        if (!pulling) return;" +
+                    "        currentY = e.touches[0].clientY;" +
+                    "        let diff = currentY - startY;" +
+                    "        let scrollTop = window.pageYOffset || document.documentElement.scrollTop;" +
+                    "" +
+                    "        if (scrollTop === 0 && diff > 0) {" +
+                    "            let moveDist = Math.min(diff * 0.4, 80);" +
+                    "            indicator.style.top = (moveDist - 45) + 'px';" +
+                    "            if (diff > threshold) {" +
+                    "                indicator.style.borderTopColor = '#10b981';" + // Zelena kad pređe prag
+                    "            } else {" +
+                    "                indicator.style.borderTopColor = '#3b82f6';" + // Plava tokom povlačenja
                     "            }" +
-                    "            el = el.parentElement;" +
-                    "        }" +
-                    "        if (!canScrollUp) {" +
-                    "            canScrollUp = (window.pageYOffset || document.documentElement.scrollTop) > 0;" +
-                    "        }" +
-                    "        if (window.RefreshBridge && typeof window.RefreshBridge.setScrollAtTop === 'function') {" +
-                    "            window.RefreshBridge.setScrollAtTop(!canScrollUp);" +
+                    "        } else {" +
+                    "            pulling = false;" +
+                    "            indicator.style.top = '-50px';" +
                     "        }" +
                     "    }, {passive: true});" +
+                    "" +
+                    "    window.addEventListener('touchend', function(e) {" +
+                    "        if (!pulling) return;" +
+                    "        let diff = currentY - startY;" +
+                    "        pulling = false;" +
+                    "" +
+                    "        if (diff > threshold) {" +
+                    "            indicator.style.top = '20px';" +
+                    "            indicator.style.animation = 'ptr-spin 0.8s linear infinite';" +
+                    "            if (window.RefreshBridge && typeof window.RefreshBridge.triggerRefresh === 'function') {" +
+                    "                window.RefreshBridge.triggerRefresh();" +
+                    "            }" +
+                    "        } else {" +
+                    "            indicator.style.top = '-50px';" +
+                    "        }" +
+                    "    }, {passive: true});" +
+                    "" +
+                    "    // Dodajemo CSS animaciju za rotaciju spinera" +
+                    "    let styleSheet = document.createElement('style');" +
+                    "    styleSheet.type = 'text/css';" +
+                    "    styleSheet.innerText = '@keyframes ptr-spin { 0% { transform: translateX(-50%) rotate(0deg); } 100% { transform: translateX(-50%) rotate(360deg); } }';" +
+                    "    document.head.appendChild(styleSheet);" +
                     "})();";
 
                 String combinedScript = 
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
-                    "    try { " + refreshBridgeJs + " } catch(e) {}" +
+                    "    try { " + pullToRefreshJs + " } catch(e) {}" +
                     "})();";
 
                 view.evaluateJavascript(combinedScript, null);
