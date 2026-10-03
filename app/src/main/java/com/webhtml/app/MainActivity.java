@@ -33,10 +33,11 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout; // Standardni nativni AndroidX SwipeRefreshLayout
+    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
+    private RefreshBridge refreshBridge; // Most za komunikaciju sa JavaScript-om za pull-to-refresh
 
     private final static int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private final static int MEDIA_PERMISSION_REQUEST_CODE = 101;
@@ -78,9 +79,13 @@ public class MainActivity extends AppCompatActivity {
         // 4. Postavljamo glavnu aktivnost da prikazuje SwipeRefreshLayout
         setContentView(swipeRefreshLayout);
 
-        // Ključna provera: Sprečava aktivaciju pull-to-refresh-a ako je unutrašnji panel/div skrolovan
+        // 5. Inicijalizujemo RefreshBridge i dodajemo ga u WebView
+        refreshBridge = new RefreshBridge();
+        webView.addJavascriptInterface(refreshBridge, "RefreshBridge");
+
+        // Ključna provera: Ako nismo na vrhu, vrati true (što sprečava pull-to-refresh i dozvoljava slobodan skrol)
         swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> {
-            return webView.getScrollY() > 0 || webView.canScrollVertically(-1);
+            return !refreshBridge.isAtTop();
         });
 
         // Listener koji se okida kada korisnik povuče nadole na samom vrhu
@@ -217,9 +222,41 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
+                // JS skripta koja prati scroll i dodire na stranici i unutrašnjim elementima
+                String refreshBridgeJs = 
+                    "(function() {" +
+                    "    window.addEventListener('scroll', function() {" +
+                    "        let scrollTop = window.pageYOffset || document.documentElement.scrollTop;" +
+                    "        if (window.RefreshBridge && typeof window.RefreshBridge.setScrollAtTop === 'function') {" +
+                    "            window.RefreshBridge.setScrollAtTop(scrollTop <= 0);" +
+                    "        }" +
+                    "    }, {passive: true});" +
+                    "" +
+                    "    window.addEventListener('touchstart', function(e) {" +
+                    "        let el = e.target;" +
+                    "        let canScrollUp = false;" +
+                    "        while (el && el !== document.body && el !== document.documentElement) {" +
+                    "            let style = window.getComputedStyle(el);" +
+                    "            let overflowY = style.getPropertyValue('overflow-y');" +
+                    "            if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollTop > 0) {" +
+                    "                canScrollUp = true;" +
+                    "                break;" +
+                    "            }" +
+                    "            el = el.parentElement;" +
+                    "        }" +
+                    "        if (!canScrollUp) {" +
+                    "            canScrollUp = (window.pageYOffset || document.documentElement.scrollTop) > 0;" +
+                    "        }" +
+                    "        if (window.RefreshBridge && typeof window.RefreshBridge.setScrollAtTop === 'function') {" +
+                    "            window.RefreshBridge.setScrollAtTop(!canScrollUp);" +
+                    "        }" +
+                    "    }, {passive: true});" +
+                    "})();";
+
                 String combinedScript = 
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
+                    "    try { " + refreshBridgeJs + " } catch(e) {}" +
                     "})();";
 
                 view.evaluateJavascript(combinedScript, null);
