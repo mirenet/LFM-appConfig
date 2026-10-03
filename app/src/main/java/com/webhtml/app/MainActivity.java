@@ -20,6 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -29,6 +30,7 @@ import java.net.URLDecoder;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -49,9 +51,31 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
+        // Dinamički kreiramo SwipeRefreshLayout kao glavni kontejner preko celog ekrana
+        swipeRefreshLayout = new SwipeRefreshLayout(this);
+        swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        // Dinamički kreiramo WebView
         webView = new WebView(this);
+        webView.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
-        setContentView(webView);
+
+        // Ubacujemo WebView unutar SwipeRefreshLayout-a
+        swipeRefreshLayout.addView(webView);
+
+        // Postavljamo SwipeRefreshLayout kao glavni sadržaj aktivnosti (bez XML fajla!)
+        setContentView(swipeRefreshLayout);
+
+        // Podešavanje Pull-to-Refresh listener-a
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            webView.reload();
+        });
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -175,6 +199,10 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                // Sakrij kružić kada se stranica učita
+                if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
