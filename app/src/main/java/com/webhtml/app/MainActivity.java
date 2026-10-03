@@ -49,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        // 1. Kreiramo samo čisti WebView preko celog ekrana (bez SwipeRefreshLayout-a)
+        // 1. Kreiramo čisti WebView preko celog ekrana (bez SwipeRefreshLayout-a)
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -184,27 +184,70 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Ubacujemo pulltorefresh.js biblioteku direktno u svaku stranicu u letu
-                String ptrScript = 
+                // Univerzalna lokalna Pull-to-Refresh skripta koja radi na svakom sajtu i lokalnom fajlu
+                String rawPtrInjection = 
                     "(function() {" +
-                    "    if (window.PullToRefresh) return;" +
-                    "    var script = document.createElement('script');" +
-                    "    script.src = 'https://unpkg.com/pulltorefreshjs@0.1.22/dist/pulltorefresh.js';" +
-                    "    script.onload = function() {" +
-                    "        PullToRefresh.init({" +
-                    "            mainElement: 'body'," +
-                    "            shouldPullToRefresh: function() {" +
-                    "                return window.scrollY === 0;" +
-                    "            }," +
-                    "            onRefresh: function() {" +
-                    "                window.location.reload();" +
+                    "    if (window._ptrInitialized) return;" +
+                    "    window._ptrInitialized = true;" +
+                    "    " +
+                    "    let startY = 0;" +
+                    "    let pulling = false;" +
+                    "    let refreshing = false;" +
+                    "    " +
+                    "    let indicator = document.createElement('div');" +
+                    "    indicator.style.cssText = 'position:fixed;top:-50px;left:50%;transform:translateX(-50%);width:35px;height:35px;background:#222;border:2px solid #555;border-radius:50%;z-index:999999;display:flex;align-items:center;justify-content:center;transition:top 0.2s;box-shadow:0 2px 5px rgba(0,0,0,0.3);';" +
+                    "    indicator.innerHTML = '<div style=\"width:18px;height:18px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:ptr-spin 0.8s linear infinite;\"></div>';" +
+                    "    " +
+                    "    let styleSheet = document.createElement('style');" +
+                    "    styleSheet.innerHTML = '@keyframes ptr-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';" +
+                    "    document.head.appendChild(styleSheet);" +
+                    "    document.body.appendChild(indicator);" +
+                    "    " +
+                    "    window.addEventListener('touchstart', function(e) {" +
+                    "        if (window.pageYOffset <= 0) {" +
+                    "            let el = e.target;" +
+                    "            let inScrollable = false;" +
+                    "            while (el && el !== document.body) {" +
+                    "                let style = window.getComputedStyle(el);" +
+                    "                let oy = style.getPropertyValue('overflow-y');" +
+                    "                if ((oy === 'auto' || oy === 'scroll') && el.scrollTop > 0) {" +
+                    "                    inScrollable = true;" +
+                    "                    break;" +
+                    "                }" +
+                    "                el = el.parentElement;" +
                     "            }" +
-                    "        });" +
-                    "    };" +
-                    "    document.head.appendChild(script);" +
+                    "            if (!inScrollable) {" +
+                    "                startY = e.touches[0].clientY;" +
+                    "                pulling = true;" +
+                    "            }" +
+                    "        }" +
+                    "    }, {passive: true});" +
+                    "    " +
+                    "    window.addEventListener('touchmove', function(e) {" +
+                    "        if (!pulling || refreshing) return;" +
+                    "        let y = e.touches[0].clientY;" +
+                    "        let diff = y - startY;" +
+                    "        if (diff > 0 && window.pageYOffset <= 0) {" +
+                    "            let pullDistance = Math.min(diff * 0.4, 80);" +
+                    "            indicator.style.top = (pullDistance - 40) + 'px';" +
+                    "            if (pullDistance > 60) {" +
+                    "                refreshing = true;" +
+                    "                pulling = false;" +
+                    "                indicator.style.top = '20px';" +
+                    "                setTimeout(function() { window.location.reload(); }, 400);" +
+                    "            }" +
+                    "        }" +
+                    "    }, {passive: true});" +
+                    "    " +
+                    "    window.addEventListener('touchend', function() {" +
+                    "        if (!refreshing) {" +
+                    "            pulling = false;" +
+                    "            indicator.style.top = '-50px';" +
+                    "        }" +
+                    "    }, {passive: true});" +
                     "})();";
 
-                view.evaluateJavascript(ptrScript, null);
+                view.evaluateJavascript(rawPtrInjection, null);
             }
             
             @Override
