@@ -1,4 +1,4 @@
-package com.example.yourapp; // Prilagodi svom paketu
+package com.webhtml.app; // Prilagodi svom paketu
 
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
