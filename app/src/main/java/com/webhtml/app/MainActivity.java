@@ -20,6 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -32,6 +33,7 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -47,22 +49,11 @@ public class MainActivity extends AppCompatActivity {
     // Sadržaj appConfig.js fajla pročitan iz assets-a
     private String appConfigJsContent = "";
 
-    // Direktan, ugrađeni kod za Pull-to-Refresh koji radi savršeno bez spoljnih fajlova
-    private final String pullToRefreshJsContent = 
+    // JavaScript koji prati poziciju skrola i obaveštava Android da li da zaključa/otključa SwipeRefreshLayout
+    private final String ptrCheckJsContent = 
         "(function () {" +
-        "    if (window._customPtrLoaded) return;" +
-        "    window._customPtrLoaded = true;" +
-        "    const PULL_THRESHOLD = 70;" +
-        "    let startY = 0, currentY = 0, pulling = false, refreshing = false;" +
-        "    let ptrElement = document.createElement('div');" +
-        "    ptrElement.className = 'custom-ptr';" +
-        "    ptrElement.innerHTML = '<div class=\"ptr-spinner\"></div>';" +
-        "    ptrElement.style.cssText = 'position:fixed;top:-50px;left:0;width:100%;height:50px;display:flex;align-items:center;justify-content:center;background:#111;border-bottom:1px solid #222;transition:transform 0.2s ease;z-index:99999;pointer-events:none;';" +
-        "    let styleTag = document.createElement('style');" +
-        "    styleTag.innerHTML = '.ptr-spinner{width:22px;height:22px;border:2px solid #444;border-top-color:#007aff;border-radius:50%;animation:ptr-spin 0.8s linear infinite;} @keyframes ptr-spin{to{transform:rotate(360deg);}}';" +
-        "    document.head.appendChild(styleTag);" +
-        "    if (document.body) document.body.appendChild(ptrElement);" +
-        "    else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(ptrElement));" +
+        "    if (window._ptrBridgeLoaded) return;" +
+        "    window._ptrBridgeLoaded = true;" +
         "    function isAnyParentScrollableUp(el) {" +
         "        let curr = el;" +
         "        while (curr && curr !== document.body && curr !== document.documentElement) {" +
@@ -77,31 +68,25 @@ public class MainActivity extends AppCompatActivity {
         "        return false;" +
         "    }" +
         "    window.addEventListener('touchstart', function (e) {" +
-        "        if (refreshing || window.scrollY > 0) return;" +
-        "        if (isAnyParentScrollableUp(e.target)) return;" +
-        "        startY = e.touches[0].clientY; pulling = true;" +
-        "    }, { passive: true });" +
-        "    window.addEventListener('touchmove', function (e) {" +
-        "        if (!pulling || refreshing) return;" +
-        "        currentY = e.touches[0].clientY;" +
-        "        let diff = currentY - startY;" +
-        "        if (diff > 0 && window.scrollY === 0) {" +
-        "            ptrElement.style.transform = 'translateY(' + Math.min(diff * 0.4, 100) + 'px)';" +
-        "        }" +
-        "    }, { passive: true });" +
-        "    window.addEventListener('touchend', function () {" +
-        "        if (!pulling || refreshing) return; pulling = false;" +
-        "        let diff = currentY - startY;" +
-        "        let pullDistance = Math.min(diff * 0.4, 100);" +
-        "        if (pullDistance >= PULL_THRESHOLD && window.scrollY === 0) {" +
-        "            refreshing = true; ptrElement.style.transform = 'translateY(50px)';" +
-        "            setTimeout(() => window.location.reload(), 400);" +
+        "        if (window.scrollY > 0 || isAnyParentScrollableUp(e.target)) {" +
+        "            if (window.PtrControl) window.PtrControl.setSwipeEnabled(false);" +
         "        } else {" +
-        "            ptrElement.style.transform = 'translateY(0px)';" +
+        "            if (window.PtrControl) window.PtrControl.setSwipeEnabled(true);" +
         "        }" +
-        "        startY = 0; currentY = 0;" +
-        "    });" +
+        "    }, { passive: true });" +
         "})();";
+
+    // Pomoćna klasa za komunikaciju između JavaScript-a i nativnog SwipeRefreshLayout-a
+    public class PtrBridge {
+        @android.webkit.JavascriptInterface
+        public void setSwipeEnabled(final boolean enabled) {
+            runOnUiThread(() -> {
+                if (swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setEnabled(enabled);
+                }
+            });
+        }
+    }
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -114,7 +99,14 @@ public class MainActivity extends AppCompatActivity {
         // Čitamo konfiguraciju iz assets foldera
         loadAppConfigJs();
         
-        // Kreiramo čisti WebView preko celog ekrana
+        // Kreiramo SwipeRefreshLayout kao glavni kontejner (da dobijemo nativni kružić)
+        swipeRefreshLayout = new SwipeRefreshLayout(this);
+        swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        // Kreiramo WebView
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -122,9 +114,19 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        setContentView(webView);
+        // Ubacujemo WebView unutar SwipeRefreshLayout-a
+        swipeRefreshLayout.addView(webView);
+        setContentView(swipeRefreshLayout);
+
+        // Podesimo akciju kada korisnik povuče nadole na vrhu stranice
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            webView.reload();
+        });
 
         downloadHelper = new DownloadHelper(this);
+
+        // Povezujemo i naš novi bridge za kontrolu pull-to-refresh-a
+        webView.addJavascriptInterface(new PtrBridge(), "PtrControl");
 
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
@@ -240,16 +242,21 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
+                // Kada se stranica učita, gasimo indikator osvežavanja ako je bio aktivan
+                if (swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Injektujemo appConfig.js i našu ugrađenu pull-to-refresh skriptu
+                // Injektujemo konfiguraciju i pametnu proveru unutrašnjeg panela
                 String combinedScript = 
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
                     "    if (typeof AppConfig !== 'undefined' && AppConfig.refresh === false) return;" +
-                    "    " + pullToRefreshJsContent +
+                    "    " + ptrCheckJsContent +
                     "})();";
 
                 view.evaluateJavascript(combinedScript, null);
@@ -486,7 +493,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
-        if (requestCode == FILE_CHOOSER_RESULT_CODE) {
+        if (requestCode == FILE_FILE_CHOOSER_RESULT_CODE || requestCode == FILE_CHOOSER_RESULT_CODE) {
             if (uploadMessage == null) return;
             Uri[] results = null;
             if (resultCode == Activity.RESULT_OK && intent != null) {
