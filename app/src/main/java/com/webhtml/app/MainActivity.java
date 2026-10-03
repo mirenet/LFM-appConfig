@@ -222,34 +222,40 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Ubacujemo pametnu skriptu koja detektuje unutrašnje skrolabilne elemente (overflow paneli)
-                String jsInjection = 
-                    "window.addEventListener('touchstart', function(e) {" +
-                    "    let el = e.target;" +
-                    "    let canScroll = false;" +
-                    "    while (el && el !== document.body && el !== document.documentElement) {" +
-                    "        let style = window.getComputedStyle(el);" +
-                    "        let overflowY = style.getPropertyValue('overflow-y');" +
-                    "        if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {" +
-                    "            if (el.scrollTop > 0) {" +
-                    "                canScroll = true;" +
-                    "                break;" +
+                // Univerzalna skripta koja se ubacuje u svaki sajt u letu (bez menjanja HTML-a)
+                String universalJsInjection = 
+                    "(function() {" +
+                    "    if (window._hasSwipeScript) return;" +
+                    "    window._hasSwipeScript = true;" +
+                    "    " +
+                    "    window.addEventListener('touchstart', function(e) {" +
+                    "        let el = e.target;" +
+                    "        let canScrollInside = false;" +
+                    "        " +
+                    "        while (el && el !== document.body && el !== document.documentElement) {" +
+                    "            let style = window.getComputedStyle(el);" +
+                    "            let overflowY = style.getPropertyValue('overflow-y');" +
+                    "            let isScrollable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay');" +
+                    "            " +
+                    "            if (isScrollable && el.scrollHeight > el.clientHeight) {" +
+                    "                if (el.scrollTop > 1) {" +
+                    "                    canScrollInside = true;" +
+                    "                    break;" +
+                    "                }" +
                     "            }" +
+                    "            el = el.parentElement;" +
                     "        }" +
-                    "        el = el.parentElement;" +
-                    "    }" +
-                    "    if (canScroll) {" +
-                    "        window.SwipeControlBridge.setSwipeEnabled(false);" +
-                    "    } else {" +
-                    "        window.SwipeControlBridge.setSwipeEnabled(true);" +
-                    "    }" +
-                    "}, {passive: true});" +
-                    
-                    "window.addEventListener('touchend', function() {" +
-                    "    window.SwipeControlBridge.setSwipeEnabled(true);" +
-                    "}, {passive: true});";
+                    "        " +
+                    "        let pageScrollY = window.pageYOffset || document.documentElement.scrollTop;" +
+                    "        if (canScrollInside || pageScrollY > 5) {" +
+                    "            window.SwipeControlBridge.setSwipeEnabled(false);" +
+                    "        } else {" +
+                    "            window.SwipeControlBridge.setSwipeEnabled(true);" +
+                    "        }" +
+                    "    }, {passive: true});" +
+                    "})();";
 
-                view.evaluateJavascript(jsInjection, null);
+                view.evaluateJavascript(universalJsInjection, null);
             }
             
             @Override
