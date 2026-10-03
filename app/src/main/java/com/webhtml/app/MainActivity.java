@@ -44,9 +44,64 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback pendingGeolocationCallback;
     private PermissionRequest pendingPermissionRequest;
 
-    // Sadržaj appConfig.js i pulltorefresh.js fajlova pročitan iz assets-a
+    // Sadržaj appConfig.js fajla pročitan iz assets-a
     private String appConfigJsContent = "";
-    private String pullToRefreshJsContent = "";
+
+    // Direktan, ugrađeni kod za Pull-to-Refresh koji radi savršeno bez spoljnih fajlova
+    private final String pullToRefreshJsContent = 
+        "(function () {" +
+        "    if (window._customPtrLoaded) return;" +
+        "    window._customPtrLoaded = true;" +
+        "    const PULL_THRESHOLD = 70;" +
+        "    let startY = 0, currentY = 0, pulling = false, refreshing = false;" +
+        "    let ptrElement = document.createElement('div');" +
+        "    ptrElement.className = 'custom-ptr';" +
+        "    ptrElement.innerHTML = '<div class=\"ptr-spinner\"></div>';" +
+        "    ptrElement.style.cssText = 'position:fixed;top:-50px;left:0;width:100%;height:50px;display:flex;align-items:center;justify-content:center;background:#111;border-bottom:1px solid #222;transition:transform 0.2s ease;z-index:99999;pointer-events:none;';" +
+        "    let styleTag = document.createElement('style');" +
+        "    styleTag.innerHTML = '.ptr-spinner{width:22px;height:22px;border:2px solid #444;border-top-color:#007aff;border-radius:50%;animation:ptr-spin 0.8s linear infinite;} @keyframes ptr-spin{to{transform:rotate(360deg);}}';" +
+        "    document.head.appendChild(styleTag);" +
+        "    if (document.body) document.body.appendChild(ptrElement);" +
+        "    else document.addEventListener('DOMContentLoaded', () => document.body.appendChild(ptrElement));" +
+        "    function isAnyParentScrollableUp(el) {" +
+        "        let curr = el;" +
+        "        while (curr && curr !== document.body && curr !== document.documentElement) {" +
+        "            const style = window.getComputedStyle(curr);" +
+        "            const overflowY = style.getPropertyValue('overflow-y');" +
+        "            const isScrollable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay');" +
+        "            if (isScrollable && curr.scrollHeight > curr.clientHeight) {" +
+        "                if (curr.scrollTop > 0) return true;" +
+        "            }" +
+        "            curr = curr.parentElement;" +
+        "        }" +
+        "        return false;" +
+        "    }" +
+        "    window.addEventListener('touchstart', function (e) {" +
+        "        if (refreshing || window.scrollY > 0) return;" +
+        "        if (isAnyParentScrollableUp(e.target)) return;" +
+        "        startY = e.touches[0].clientY; pulling = true;" +
+        "    }, { passive: true });" +
+        "    window.addEventListener('touchmove', function (e) {" +
+        "        if (!pulling || refreshing) return;" +
+        "        currentY = e.touches[0].clientY;" +
+        "        let diff = currentY - startY;" +
+        "        if (diff > 0 && window.scrollY === 0) {" +
+        "            ptrElement.style.transform = 'translateY(' + Math.min(diff * 0.4, 100) + 'px)';" +
+        "        }" +
+        "    }, { passive: true });" +
+        "    window.addEventListener('touchend', function () {" +
+        "        if (!pulling || refreshing) return; pulling = false;" +
+        "        let diff = currentY - startY;" +
+        "        let pullDistance = Math.min(diff * 0.4, 100);" +
+        "        if (pullDistance >= PULL_THRESHOLD && window.scrollY === 0) {" +
+        "            refreshing = true; ptrElement.style.transform = 'translateY(50px)';" +
+        "            setTimeout(() => window.location.reload(), 400);" +
+        "        } else {" +
+        "            ptrElement.style.transform = 'translateY(0px)';" +
+        "        }" +
+        "        startY = 0; currentY = 0;" +
+        "    });" +
+        "})();";
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -56,11 +111,10 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
 
-        // 1. Čitamo konfiguraciju i pull to refresh skriptu iz assets foldera
+        // Čitamo konfiguraciju iz assets foldera
         loadAppConfigJs();
-        loadPullToRefreshJs();
         
-        // 2. Kreiramo čisti WebView preko celog ekrana
+        // Kreiramo čisti WebView preko celog ekrana
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -190,24 +244,12 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Injektujemo appConfig.js, pulltorefresh.js biblioteku i inicijalizujemo je
+                // Injektujemo appConfig.js i našu ugrađenu pull-to-refresh skriptu
                 String combinedScript = 
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
                     "    if (typeof AppConfig !== 'undefined' && AppConfig.refresh === false) return;" +
-                    "    if (window._ptrInitialized) return;" +
-                    "    window._ptrInitialized = true;" +
-                    "    " +
-                    pullToRefreshJsContent +
-                    "    " +
-                    "    if (typeof PullToRefresh !== 'undefined') {" +
-                    "        PullToRefresh.init({" +
-                    "            mainElement: 'body'," +
-                    "            onRefresh: function() {" +
-                    "                window.location.reload();" +
-                    "            }" +
-                    "        });" +
-                    "    }" +
+                    "    " + pullToRefreshJsContent +
                     "})();";
 
                 view.evaluateJavascript(combinedScript, null);
@@ -392,24 +434,6 @@ public class MainActivity extends AppCompatActivity {
             appConfigJsContent = sb.toString();
         } catch (Exception e) {
             appConfigJsContent = "const AppConfig = { refresh: true };";
-        }
-    }
-
-    // Pomoćna metoda za čitanje pulltorefresh.js iz assets foldera
-    private void loadPullToRefreshJs() {
-        try {
-            AssetManager assetManager = getAssets();
-            InputStream is = assetManager.open("pulltorefresh.js");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(is));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
-            }
-            reader.close();
-            pullToRefreshJsContent = sb.toString();
-        } catch (Exception e) {
-            pullToRefreshJsContent = "";
         }
     }
 
