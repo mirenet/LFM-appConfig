@@ -66,6 +66,12 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
+        // Postavljamo ogroman prag (40% visine ekrana) da se pull-to-refresh 
+        // ne može aktivirati slučajno, već samo uz dubok i svestan pokret nadole
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int triggerDistance = (int) (screenHeight * 0.4); 
+        swipeRefreshLayout.setDistanceToTriggerSync(triggerDistance);
+
         // 2. Kreiramo WebView
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
@@ -92,7 +98,7 @@ public class MainActivity extends AppCompatActivity {
             return !refreshBridge.isAtTop();
         });
 
-        // Nativna kontrola dodira i smera povlačenja (sprečava lažno paljenje kružića na prvi dodir)
+        // Nativna kontrola dodira i smera povlačenja
         final float[] startY = {0f};
         swipeRefreshLayout.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
@@ -119,7 +125,7 @@ public class MainActivity extends AppCompatActivity {
             return false;
         });
 
-        // Listener koji se okida kada korisnik povuče nadole na samom vrhu
+        // Listener koji se okida kada korisnik povuče nadole preko definisanog praga
         swipeRefreshLayout.setOnRefreshListener(() -> {
             webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
                 if ("false".equals(value)) {
