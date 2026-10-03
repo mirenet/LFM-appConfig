@@ -1,5 +1,6 @@
 package com.webhtml.app;
 
+import android.webkit.WebView;
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.util.AttributeSet;
