@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -49,7 +50,6 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        // Postavljamo layout koji sadrži SwipeRefreshLayout i WebView
         setContentView(R.layout.activity_main);
 
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
@@ -68,10 +68,17 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Pametna provera: Dozvoli pull-to-refresh SAMO ako je WebView na samom vrhu (scrollY == 0)
-        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
-            swipeRefreshLayout.setEnabled(scrollY == 0);
-        });
+        // PAMETNO REŠENJE: JavaScript bridge preko kog kontrolišemo SwipeRefreshLayout
+        webView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void setSwipeEnabled(final boolean enabled) {
+                runOnUiThread(() -> {
+                    if (swipeRefreshLayout != null) {
+                        swipeRefreshLayout.setEnabled(enabled);
+                    }
+                });
+            }
+        }, "SwipeController");
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -191,11 +198,32 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 
+                // Ubacujemo JavaScript koji proverava da li je prst na skrolabilnom panelu ili dnu stranice
+                String jsFix = "document.addEventListener('touchstart', function(e) {" +
+                        "  var target = e.target;" +
+                        "  var isAtTop = true;" +
+                        "  while (target && target !== document.body) {" +
+                        "    var overflowY = window.getComputedStyle(target).overflowY;" +
+                        "    if ((overflowY === 'auto' || overflowY === 'scroll') && target.scrollTop > 0) {" +
+                        "      isAtTop = false;" +
+                        "      break;" +
+                        "    }" +
+                        "    target = target.parentElement;" +
+                        "  }" +
+                        "  if (window.pageYOffset > 0) {" +
+                        "    isAtTop = false;" +
+                        "  }" +
+                        "  if (window.SwipeController) {" +
+                        "    window.SwipeController.setSwipeEnabled(isAtTop);" +
+                        "  }" +
+                        "}, {passive: true});";
+
+                view.evaluateJavascript(jsFix, null);
+
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Kada se stranica ucita, gasimo spiner osvežavanja ukoliko je bio aktivan
                 if (swipeRefreshLayout != null) {
                     swipeRefreshLayout.setRefreshing(false);
                 }
