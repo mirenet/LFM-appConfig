@@ -1,5 +1,7 @@
 package com.webhtml.app;
 
+import android.view.ViewGroup;
+import android.widget.LinearLayout;
 import com.webhtml.app.R;
 
 import android.annotation.SuppressLint;
