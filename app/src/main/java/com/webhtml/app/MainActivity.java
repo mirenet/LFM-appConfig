@@ -20,7 +20,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -33,7 +32,6 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -49,12 +47,50 @@ public class MainActivity extends AppCompatActivity {
     // Sadržaj appConfig.js fajla pročitan iz assets-a
     private String appConfigJsContent = "";
 
-    // JavaScript sa multi-phase logikom za praćenje panela i vrha stranice
-    private final String ptrCheckJsContent = 
+    // Čista JavaScript skripta za Pull-to-Refresh sa zaštitom unutrašnjih panela
+    private final String customPtrJsContent = 
         "(function () {" +
-        "    if (window._ptrBridgeLoaded) return;" +
-        "    window._ptrBridgeLoaded = true;" +
+        "    if (window._customPtrLoaded) return;" +
+        "    window._customPtrLoaded = true;" +
+        "    " +
+        "    const style = document.createElement('style');" +
+        "    style.innerHTML = `" +
+        "        #custom-ptr-spinner {" +
+        "            position: fixed;" +
+        "            top: -50px;" +
+        "            left: 50%;" +
+        "            transform: translateX(-50%);" +
+        "            width: 36px;" +
+        "            height: 36px;" +
+        "            background: #222;" +
+        "            border: 2px solid #444;" +
+        "            border-top: 2px solid #3498db;" +
+        "            border-radius: 50%;" +
+        "            z-index: 999999;" +
+        "            transition: top 0.2s ease, transform 0.1s linear;" +
+        "            display: flex;" +
+        "            align-items: center;" +
+        "            justify-content: center;" +
+        "            box-shadow: 0 4px 10px rgba(0,0,0,0.3);" +
+        "        }" +
+        "        #custom-ptr-spinner.spinning {" +
+        "            animation: ptr-spin 0.8s linear infinite;" +
+        "        }" +
+        "        @keyframes ptr-spin {" +
+        "            0% { transform: translateX(-50%) rotate(0deg); }" +
+        "            100% { transform: translateX(-50%) rotate(360deg); }" +
+        "        }" +
+        "    `;" +
+        "    document.head.appendChild(style);" +
+        "    " +
+        "    const spinner = document.createElement('div');" +
+        "    spinner.id = 'custom-ptr-spinner';" +
+        "    document.body.appendChild(spinner);" +
+        "    " +
         "    let startY = 0;" +
+        "    let currentY = 0;" +
+        "    let pulling = false;" +
+        "    let refreshing = false;" +
         "    let activeScrollElement = null;" +
         "    " +
         "    function getScrollableParent(el) {" +
@@ -72,46 +108,52 @@ public class MainActivity extends AppCompatActivity {
         "    }" +
         "    " +
         "    window.addEventListener('touchstart', function (e) {" +
+        "        if (refreshing) return;" +
         "        startY = e.touches[0].clientY;" +
         "        activeScrollElement = getScrollableParent(e.target);" +
-        "        // U startu uvek gasimo da sprečimo brzu otmicu gesta" +
-        "        if (window.PtrControl) window.PtrControl.setSwipeEnabled(false);" +
+        "        pulling = false;" +
         "    }, { passive: true });" +
         "    " +
         "    window.addEventListener('touchmove', function (e) {" +
-        "        let currentY = e.touches[0].clientY;" +
+        "        if (refreshing) return;" +
+        "        currentY = e.touches[0].clientY;" +
         "        let diff = currentY - startY;" +
         "        " +
-        "        // Čekamo minimalni prag pomeranja" +
-        "        if (diff <= 5) return;" +
+        "        if (diff <= 10) return;" +
         "        " +
-        "        if (window.scrollY === 0) {" +
-        "            if (!activeScrollElement) {" +
-        "                if (window.PtrControl) window.PtrControl.setSwipeEnabled(true);" +
-        "            } else {" +
-        "                if (activeScrollElement.scrollTop === 0) {" +
-        "                    if (window.PtrControl) window.PtrControl.setSwipeEnabled(true);" +
-        "                } else {" +
-        "                    if (window.PtrControl) window.PtrControl.setSwipeEnabled(false);" +
-        "                }" +
-        "            }" +
-        "        } else {" +
-        "            if (window.PtrControl) window.PtrControl.setSwipeEnabled(false);" +
+        "        let isAtTop = (window.scrollY === 0) && (!activeScrollElement || activeScrollElement.scrollTop === 0);" +
+        "        " +
+        "        if (!isAtTop) {" +
+        "            pulling = false;" +
+        "            return;" +
         "        }" +
-        "    }, { passive: true });" +
+        "        " +
+        "        pulling = true;" +
+        "        e.preventDefault();" +
+        "        " +
+        "        let pullDistance = Math.min(Math.max(diff * 0.4, 0), 80);" +
+        "        spinner.style.top = (pullDistance - 40) + 'px';" +
+        "        spinner.style.transform = `translateX(-50%) rotate(${diff * 2}deg)';" +
+        "    }, { passive: false });" +
+        "    " +
+        "    window.addEventListener('touchend', function () {" +
+        "        if (!pulling || refreshing) return;" +
+        "        pulling = false;" +
+        "        " +
+        "        let diff = currentY - startY;" +
+        "        if (diff > 120) {" +
+        "            refreshing = true;" +
+        "            spinner.classList.add('spinning');" +
+        "            spinner.style.top = '20px';" +
+        "            setTimeout(() => {" +
+        "                window.location.reload();" +
+        "            }, 400);" +
+        "        } else {" +
+        "            spinner.style.top = '-50px';" +
+        "            spinner.classList.remove('spinning');" +
+        "        }" +
+        "    });" +
         "})();";
-
-    // Pomoćna klasa za komunikaciju između JavaScript-a i nativnog SwipeRefreshLayout-a
-    public class PtrBridge {
-        @android.webkit.JavascriptInterface
-        public void setSwipeEnabled(final boolean enabled) {
-            runOnUiThread(() -> {
-                if (swipeRefreshLayout != null) {
-                    swipeRefreshLayout.setEnabled(enabled);
-                }
-            });
-        }
-    }
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -124,17 +166,7 @@ public class MainActivity extends AppCompatActivity {
         // Čitamo konfiguraciju iz assets foldera
         loadAppConfigJs();
         
-        // Kreiramo SwipeRefreshLayout kao glavni kontejner
-        swipeRefreshLayout = new SwipeRefreshLayout(this);
-        swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
-        // **KLJUČNA IZMENA:** U startu ga potpuno gasimo da Android ne otima gest automatski
-        swipeRefreshLayout.setEnabled(false);
-
-        // Kreiramo WebView
+        // Kreiramo WebView kao direktan i glavni prikaz
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -142,19 +174,9 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        // Ubacujemo WebView unutar SwipeRefreshLayout-a
-        swipeRefreshLayout.addView(webView);
-        setContentView(swipeRefreshLayout);
-
-        // Podesimo akciju kada korisnik povuče nadole na vrhu stranice
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            webView.reload();
-        });
+        setContentView(webView);
 
         downloadHelper = new DownloadHelper(this);
-
-        // Povezujemo bridge za kontrolu pull-to-refresh-a
-        webView.addJavascriptInterface(new PtrBridge(), "PtrControl");
 
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
@@ -270,10 +292,6 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
-                if (swipeRefreshLayout != null) {
-                    swipeRefreshLayout.setRefreshing(false);
-                }
-
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
@@ -282,7 +300,7 @@ public class MainActivity extends AppCompatActivity {
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
                     "    if (typeof AppConfig !== 'undefined' && AppConfig.refresh === false) return;" +
-                    "    " + ptrCheckJsContent +
+                    "    " + customPtrJsContent +
                     "})();";
 
                 view.evaluateJavascript(combinedScript, null);
