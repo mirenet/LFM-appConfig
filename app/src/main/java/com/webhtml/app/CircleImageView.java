@@ -7,17 +7,29 @@ import android.graphics.drawable.ShapeDrawable;
 import android.graphics.drawable.shapes.OvalShape;
 import android.os.Build;
 import android.view.View;
+import android.view.animation.Animation;
 import androidx.appcompat.widget.AppCompatImageView;
 import androidx.core.view.ViewCompat;
 
 class CircleImageView extends AppCompatImageView {
 
     private int mShadowRadius;
+    private Animation.AnimationListener mListener;
 
+    // Konstruktor koji koristi GoNativeSwipeRefreshLayout (sa 2 parametra)
+    public CircleImageView(Context context, int color) {
+        super(context);
+        init(color, 20f); // Podrazumevani radius
+    }
+
+    // Konstruktor sa 3 parametra (ako se negde poziva)
     public CircleImageView(Context context, int color, float radius) {
         super(context);
+        init(color, radius);
+    }
+
+    private void init(int color, float radius) {
         final float density = getContext().getResources().getDisplayMetrics().density;
-        final int diameter = (int) (radius * density * 2);
         final int shadowYOffset = (int) (density * 1.75f);
         final int shadowXOffset = (int) (0f * density);
 
@@ -60,6 +72,26 @@ class CircleImageView extends AppCompatImageView {
             int diameter = getMeasuredWidth() + mShadowRadius * 2;
             int height = getMeasuredHeight() + mShadowRadius * 2;
             setMeasuredDimension(diameter, height);
+        }
+    }
+
+    public void setAnimationListener(Animation.AnimationListener listener) {
+        mListener = listener;
+    }
+
+    @Override
+    public void onAnimationStart() {
+        super.onAnimationStart();
+        if (mListener != null) {
+            mListener.onAnimationStart(getAnimation());
+        }
+    }
+
+    @Override
+    public void onAnimationEnd() {
+        super.onAnimationEnd();
+        if (mListener != null) {
+            mListener.onAnimationEnd(getAnimation());
         }
     }
 }
