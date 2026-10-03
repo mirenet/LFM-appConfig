@@ -37,7 +37,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
-    private RefreshBridge refreshBridge; // Most za komunikaciju sa JavaScript-om za pull-to-refresh
+    private RefreshBridge refreshBridge; // Most za praćenje pozicije skrola preko JS-a
 
     private final static int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private final static int MEDIA_PERMISSION_REQUEST_CODE = 101;
@@ -83,7 +83,7 @@ public class MainActivity extends AppCompatActivity {
         refreshBridge = new RefreshBridge();
         webView.addJavascriptInterface(refreshBridge, "RefreshBridge");
 
-        // Ključna provera: Ako nismo na vrhu, vrati true (što sprečava pull-to-refresh i dozvoljava slobodan skrol)
+        // Ključna provera: Ako nismo na vrhu, vrati true (sprečava pull-to-refresh i dozvoljava slobodan skrol)
         swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> {
             return !refreshBridge.isAtTop();
         });
@@ -222,7 +222,7 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // JS skripta koja prati scroll i dodire na stranici i unutrašnjim elementima
+                // JS skripta koja pre dolaska prsta na ekran detektuje da li je stranica ili unutrašnji panel na vrhu
                 String refreshBridgeJs = 
                     "(function() {" +
                     "    window.addEventListener('scroll', function() {" +
