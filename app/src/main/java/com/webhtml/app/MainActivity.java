@@ -19,6 +19,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -28,11 +29,11 @@ import java.net.URLDecoder;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
 
-    // Kodovi i promenljive za sistemske dozvole u hodu
     private final static int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private final static int MEDIA_PERMISSION_REQUEST_CODE = 101;
     
@@ -48,9 +49,29 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        webView = new WebView(this);
+        // Postavljamo layout koji sadrži SwipeRefreshLayout i WebView
+        setContentView(R.layout.activity_main);
+
+        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
+        webView = findViewById(R.id.webView);
+        
         webView.setBackgroundColor(Color.parseColor("#070707"));
-        setContentView(webView); // Direktno postavljamo WebView bez RefreshHelper-a
+
+        // Podešavanje SwipeRefreshLayout-a (boja spinnera i pozadina)
+        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#1F1F1F"));
+        swipeRefreshLayout.setColorSchemeColors(Color.WHITE);
+
+        // Akcija kada korisnik povuče nadole
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            if (webView != null) {
+                webView.reload();
+            }
+        });
+
+        // Pametna provera: Dozvoli pull-to-refresh SAMO ako je WebView na samom vrhu (scrollY == 0)
+        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            swipeRefreshLayout.setEnabled(scrollY == 0);
+        });
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -68,17 +89,12 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setSupportMultipleWindows(false);
         webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
 
-        // Omogućavanje kolačića i kolačića treće strane
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-        // Registrujemo DownloadHelper kao JavaScript Bridge
         webView.addJavascriptInterface(downloadHelper, "AndroidBridge");
-
-        // Zaključavanje orijentacije na portret po potrebi
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
 
-        // Moderno upravljanje dugmetom nazad (OnBackPressedDispatcher)
         getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -179,74 +195,10 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // INJEKCIJA PULL-TO-REFRESH SKRIPTE SA PRAĆENJEM PRSTA
-                String injectionScript = "(function() {" +
-                        "  if (!document.getElementById('native-ptr-style')) {" +
-                        "    var style = document.createElement('style');" +
-                        "    style.id = 'native-ptr-style';" +
-                        "    style.innerHTML = '#ptr-container { position: fixed; top: -60px; left: 0; width: 100%%; height: 60px; display: flex; align-items: center; justify-content: center; z-index: 99999; transition: transform 0.2s ease; pointer-events: none; } ' +" +
-                        "                       #ptr-spinner { width: 36px; height: 36px; background: #1F1F1F; border-radius: 50%%; box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; } ' +" +
-                        "                       #ptr-spinner .ptr-icon { width: 18px; height: 18px; border: 2px solid #FFF; border-top-color: transparent; border-radius: 50%%; animation: ptr-spin 0.8s linear infinite; } ' +" +
-                        "                       @keyframes ptr-spin { to { transform: rotate(360deg); } }';" +
-                        "    document.head.appendChild(style);" +
-                        "  }" +
-                        "  if (!document.getElementById('ptr-container')) {" +
-                        "    var div = document.createElement('div');" +
-                        "    div.id = 'ptr-container';" +
-                        "    div.innerHTML = '<div id=\"ptr-spinner\"><div class=\"ptr-icon\"></div></div>';" +
-                        "    document.body.appendChild(div);" +
-                        "  }" +
-                        "  if (!window.hasPtrInitialized) {" +
-                        "    window.hasPtrInitialized = true;" +
-                        "    let startY = 0, pulling = false, refreshing = false;" +
-                        "    const container = document.getElementById('ptr-container');" +
-                        "" +
-                        "    window.addEventListener('touchstart', e => {" +
-                        "      if (window.scrollY <= 2) {" +
-                        "        startY = e.touches[0].clientY;" +
-                        "        pulling = true;" +
-                        "      } else {" +
-                        "        pulling = false;" +
-                        "      }" +
-                        "    }, {passive: true});" +
-                        "" +
-                        "    window.addEventListener('touchmove', e => {" +
-                        "      if (!pulling || refreshing) return;" +
-                        "      let currentY = e.touches[0].clientY;" +
-                        "      let diff = currentY - startY;" +
-                        "" +
-                        "      if (diff > 0 && window.scrollY <= 2) {" +
-                        "        let el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);" +
-                        "        let canRefresh = true;" +
-                        "        while (el && el !== document.body && el !== document.documentElement) {" +
-                        "          let style = window.getComputedStyle(el);" +
-                        "          let overflowY = style.getPropertyValue('overflow-y');" +
-                        "          if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {" +
-                        "            if (el.scrollTop > 2) { canRefresh = false; break; }" +
-                        "          }" +
-                        "          el = el.parentElement;" +
-                        "        }" +
-                        "        if (canRefresh) {" +
-                        "          let pullDist = Math.min(diff * 0.4, 80);" +
-                        "          container.style.transform = 'translateY(' + pullDist + 'px)';" +
-                        "          if (pullDist >= 70) {" +
-                        "            refreshing = true;" +
-                        "            container.style.transform = 'translateY(70px)';" +
-                        "            setTimeout(() => { window.location.reload(); }, 300);" +
-                        "          }" +
-                        "        }" +
-                        "      }" +
-                        "    }, {passive: true});" +
-                        "" +
-                        "    window.addEventListener('touchend', () => {" +
-                        "      if (!refreshing) {" +
-                        "        container.style.transform = 'translateY(0px)';" +
-                        "      }" +
-                        "      pulling = false;" +
-                        "    }, {passive: true});" +
-                        "  }" +
-                        "})();";
-                view.evaluateJavascript(injectionScript, null);
+                // Kada se stranica ucita, gasimo spiner osvežavanja ukoliko je bio aktivan
+                if (swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
             }
             
             @Override
