@@ -7,6 +7,7 @@ import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -32,7 +33,6 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private CustomSwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -47,7 +47,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String appConfigJsContent = "";
 
-    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
+    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded", "ClickableViewAccessibility"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
@@ -57,19 +57,7 @@ public class MainActivity extends AppCompatActivity {
 
         loadAppConfigJs();
         
-        // 1. Inicijalizujemo CustomSwipeRefreshLayout preko celog ekrana
-        swipeRefreshLayout = new CustomSwipeRefreshLayout(this);
-        swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
-        // Postavljamo željeni prag (npr. 40% visine ekrana)
-        int screenHeight = getResources().getDisplayMetrics().heightPixels;
-        int triggerDistance = (int) (screenHeight * 0.4); 
-        swipeRefreshLayout.setDistanceToTriggerSync(triggerDistance);
-
-        // 2. Kreiramo WebView
+        // 1. Kreiramo samo čist WebView preko celog ekrana (NEMA SwipeRefreshLayout-a!)
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -77,34 +65,65 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        // 3. Ubacujemo WebView unutar CustomSwipeRefreshLayout-a
-        swipeRefreshLayout.addView(webView);
+        // 2. Postavljamo WebView kao glavni sadržaj aktivnosti
+        setContentView(webView);
 
-        // 4. Postavljamo glavnu aktivnost
-        setContentView(swipeRefreshLayout);
-
-        // 5. Inicijalizujemo RefreshBridge
+        // 3. Inicijalizujemo RefreshBridge
         refreshBridge = new RefreshBridge();
         webView.addJavascriptInterface(refreshBridge, "RefreshBridge");
 
-        // KLJUČNO: Direktna, trenutna provera. Ako je WebView skrolovan nadole (getScrollY() > 0)
-        // ili unutrašnji elementi nisu na vrhu, ovo vraća TRUE i SwipeRefreshLayout se odmah gasi!
-        swipeRefreshLayout.setOnScrollUpCheckListener(() -> {
-            if (webView.getScrollY() > 0) {
-                return true;
-            }
-            return !refreshBridge.isAtTop();
-        });
+        // 4. Nativna kontrola dodira direktno nad WebView-om (Nema svađe oko dodira!)
+        final float[] startY = {0f};
+        final boolean[] isPullingDown = {false};
+        
+        // Izračunavamo prag (npr. 40% visine ekrana, isto kao što smo hteli)
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int triggerDistance = (int) (screenHeight * 0.4);
 
-        // Listener za osvežavanje kada se pređe prag
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
-                if ("false".equals(value)) {
-                    swipeRefreshLayout.setRefreshing(false);
-                } else {
-                    webView.reload();
-                }
-            });
+        webView.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    startY[0] = event.getY();
+                    isPullingDown[0] = false;
+                    break;
+                    
+                case MotionEvent.ACTION_MOVE:
+                    float currentY = event.getY();
+                    float diff = currentY - startY[0];
+                    
+                    // Dozvoljavamo povlačenje SAMO ako:
+                    // 1. Vučemo nadole (diff > 0)
+                    // 2. Je WebView na samom vrhu (webView.getScrollY() == 0)
+                    // 3. Su i unutrašnji elementi na vrhu (refreshBridge.isAtTop())
+                    if (diff > 0 && webView.getScrollY() == 0 && refreshBridge.isAtTop()) {
+                        isPullingDown[0] = true;
+                        
+                        // Ako je korisnik prešao prag od 40% visine ekrana
+                        if (diff > triggerDistance) {
+                            // Resetujemo stanje da se ne okida više puta tokom istog povlačenja
+                            startY[0] = currentY; 
+                            isPullingDown[0] = false;
+                            
+                            // Proveravamo AppConfig i osvežavamo stranicu
+                            webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
+                                if (!"false".equals(value)) {
+                                    webView.reload();
+                                }
+                            });
+                        }
+                    } else {
+                        isPullingDown[0] = false;
+                    }
+                    break;
+                    
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    isPullingDown[0] = false;
+                    break;
+            }
+            
+            // Vratimo FALSE da WebView i daljenormalno obrađuje skrolovanje i klikove!
+            return false;
         });
 
         downloadHelper = new DownloadHelper(this);
@@ -221,10 +240,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-
-                if (swipeRefreshLayout != null) {
-                    swipeRefreshLayout.setRefreshing(false);
-                }
 
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
@@ -499,7 +514,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
-        if (requestCode == FILE_CHOOSER_RESULT_CODE) {
+        if (requestCode == FILE_CHOOS.class.getName().hashCode() || requestCode == FILE_CHOOSER_RESULT_CODE) {
             if (uploadMessage == null) return;
             Uri[] results = null;
             if (resultCode == Activity.RESULT_OK && intent != null) {
