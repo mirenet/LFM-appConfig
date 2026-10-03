@@ -47,7 +47,7 @@ public class MainActivity extends AppCompatActivity {
     // Sadržaj appConfig.js fajla pročitan iz assets-a
     private String appConfigJsContent = "";
 
-    // Čista JavaScript skripta za Pull-to-Refresh sa zaštitom unutrašnjih panela
+    // Pouzdana čista JavaScript skripta za Pull-to-Refresh sa spinerom
     private final String customPtrJsContent = 
         "(function () {" +
         "    if (window._customPtrLoaded) return;" +
@@ -60,18 +60,18 @@ public class MainActivity extends AppCompatActivity {
         "            top: -50px;" +
         "            left: 50%;" +
         "            transform: translateX(-50%);" +
-        "            width: 36px;" +
-        "            height: 36px;" +
-        "            background: #222;" +
-        "            border: 2px solid #444;" +
+        "            width: 38px;" +
+        "            height: 38px;" +
+        "            background: #1a1a1a;" +
+        "            border: 2px solid #333;" +
         "            border-top: 2px solid #3498db;" +
         "            border-radius: 50%;" +
         "            z-index: 999999;" +
-        "            transition: top 0.2s ease, transform 0.1s linear;" +
+        "            transition: top 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);" +
         "            display: flex;" +
         "            align-items: center;" +
         "            justify-content: center;" +
-        "            box-shadow: 0 4px 10px rgba(0,0,0,0.3);" +
+        "            box-shadow: 0 4px 12px rgba(0,0,0,0.5);" +
         "        }" +
         "        #custom-ptr-spinner.spinning {" +
         "            animation: ptr-spin 0.8s linear infinite;" +
@@ -88,71 +88,55 @@ public class MainActivity extends AppCompatActivity {
         "    document.body.appendChild(spinner);" +
         "    " +
         "    let startY = 0;" +
-        "    let currentY = 0;" +
         "    let pulling = false;" +
         "    let refreshing = false;" +
-        "    let activeScrollElement = null;" +
-        "    " +
-        "    function getScrollableParent(el) {" +
-        "        let curr = el;" +
-        "        while (curr && curr !== document.body && curr !== document.documentElement) {" +
-        "            const style = window.getComputedStyle(curr);" +
-        "            const overflowY = style.getPropertyValue('overflow-y');" +
-        "            const isScrollable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay');" +
-        "            if (isScrollable && curr.scrollHeight > curr.clientHeight) {" +
-        "                return curr;" +
-        "            }" +
-        "            curr = curr.parentElement;" +
-        "        }" +
-        "        return null;" +
-        "    }" +
         "    " +
         "    window.addEventListener('touchstart', function (e) {" +
-        "        if (refreshing) return;" +
-        "        startY = e.touches[0].clientY;" +
-        "        activeScrollElement = getScrollableParent(e.target);" +
-        "        pulling = false;" +
+        "        if (window.scrollY <= 2 && !refreshing) {" +
+        "            startY = e.touches[0].clientY;" +
+        "            pulling = true;" +
+        "        } else {" +
+        "            pulling = false;" +
+        "        }" +
         "    }, { passive: true });" +
         "    " +
         "    window.addEventListener('touchmove', function (e) {" +
-        "        if (refreshing) return;" +
-        "        currentY = e.touches[0].clientY;" +
+        "        if (!pulling || refreshing) return;" +
+        "        let currentY = e.touches[0].clientY;" +
         "        let diff = currentY - startY;" +
         "        " +
-        "        if (diff <= 10) return;" +
-        "        " +
-        "        let isAtTop = (window.scrollY === 0) && (!activeScrollElement || activeScrollElement.scrollTop === 0);" +
-        "        " +
-        "        if (!isAtTop) {" +
+        "        if (window.scrollY > 2) {" +
         "            pulling = false;" +
+        "            spinner.style.top = '-50px';" +
         "            return;" +
         "        }" +
         "        " +
-        "        pulling = true;" +
-        "        e.preventDefault();" +
-        "        " +
-        "        let pullDistance = Math.min(Math.max(diff * 0.4, 0), 80);" +
-        "        spinner.style.top = (pullDistance - 40) + 'px';" +
-        "        spinner.style.transform = `translateX(-50%) rotate(${diff * 2}deg)';" +
-        "    }, { passive: false });" +
+        "        if (diff > 0) {" +
+        "            let pullDistance = Math.min(diff * 0.4, 90);" +
+        "            spinner.style.top = (pullDistance - 45) + 'px';" +
+        "            if (diff > 110) {" +
+        "                spinner.style.borderColor = '#3498db';" +
+        "            }" +
+        "        }" +
+        "    }, { passive: true });" +
         "    " +
-        "    window.addEventListener('touchend', function () {" +
+        "    window.addEventListener('touchend', function (e) {" +
         "        if (!pulling || refreshing) return;" +
         "        pulling = false;" +
+        "        let diff = (e.changedTouches[0] ? e.changedTouches[0].clientY : startY) - startY;" +
         "        " +
-        "        let diff = currentY - startY;" +
-        "        if (diff > 120) {" +
+        "        if (diff > 110 && window.scrollY <= 2) {" +
         "            refreshing = true;" +
         "            spinner.classList.add('spinning');" +
-        "            spinner.style.top = '20px';" +
+        "            spinner.style.top = '25px';" +
         "            setTimeout(() => {" +
         "                window.location.reload();" +
-        "            }, 400);" +
+        "            }, 300);" +
         "        } else {" +
         "            spinner.style.top = '-50px';" +
         "            spinner.classList.remove('spinning');" +
         "        }" +
-        "    });" +
+        "    }, { passive: true });" +
         "})();";
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
@@ -166,7 +150,7 @@ public class MainActivity extends AppCompatActivity {
         // Čitamo konfiguraciju iz assets foldera
         loadAppConfigJs();
         
-        // Kreiramo WebView kao direktan i glavni prikaz
+        // Kreiramo WebView kao direktan i glavni prikaz preko celog ekrana
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -309,7 +293,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String urlStr = request.getUrl().toString();
-                if (!urlStr.contains("#")) {
+                
+                // VAŽNO: Preskačemo lokalne fajlove i assete da ne bi pucalo učitavanje aplikacije!
+                if (urlStr.startsWith("file://") || !urlStr.contains("#")) {
                     return super.shouldInterceptRequest(view, request);
                 }
 
