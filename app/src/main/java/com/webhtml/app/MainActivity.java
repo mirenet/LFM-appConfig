@@ -7,7 +7,6 @@ import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -21,7 +20,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -34,7 +32,7 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout;
+    private CustomSwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -49,7 +47,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String appConfigJsContent = "";
 
-    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded", "ClickableViewAccessibility"})
+    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
@@ -59,14 +57,14 @@ public class MainActivity extends AppCompatActivity {
 
         loadAppConfigJs();
         
-        // 1. Inicijalizujemo standardni AndroidX SwipeRefreshLayout preko celog ekrana
-        swipeRefreshLayout = new SwipeRefreshLayout(this);
+        // 1. Inicijalizujemo CustomSwipeRefreshLayout preko celog ekrana
+        swipeRefreshLayout = new CustomSwipeRefreshLayout(this);
         swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        // Postavljamo prag (40% visine ekrana) da se pull-to-refresh ne aktivira slučajno
+        // Postavljamo željeni prag (npr. 40% visine ekrana)
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
         int triggerDistance = (int) (screenHeight * 0.4); 
         swipeRefreshLayout.setDistanceToTriggerSync(triggerDistance);
@@ -79,52 +77,26 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        // 3. Ubacujemo WebView unutar SwipeRefreshLayout-a
+        // 3. Ubacujemo WebView unutar CustomSwipeRefreshLayout-a
         swipeRefreshLayout.addView(webView);
 
-        // 4. Postavljamo glavnu aktivnost da prikazuje SwipeRefreshLayout
+        // 4. Postavljamo glavnu aktivnost
         setContentView(swipeRefreshLayout);
 
-        // 5. Inicijalizujemo RefreshBridge i dodajemo ga u WebView
+        // 5. Inicijalizujemo RefreshBridge
         refreshBridge = new RefreshBridge();
         webView.addJavascriptInterface(refreshBridge, "RefreshBridge");
 
-        // Ključna provera: Ako nismo na vrhu, sprečavamo refresh
-        swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> {
-            if (webView.canScrollVertically(-1)) {
+        // KLJUČNO: Direktna, trenutna provera. Ako je WebView skrolovan nadole (getScrollY() > 0)
+        // ili unutrašnji elementi nisu na vrhu, ovo vraća TRUE i SwipeRefreshLayout se odmah gasi!
+        swipeRefreshLayout.setOnScrollUpCheckListener(() -> {
+            if (webView.getScrollY() > 0) {
                 return true;
             }
             return !refreshBridge.isAtTop();
         });
 
-        // Stabilna nativna kontrola dodira sa osiguranim resetovanjem stanja u ACTION_UP
-        final float[] startY = {0f};
-        swipeRefreshLayout.setOnTouchListener((v, event) -> {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    startY[0] = event.getY();
-                    break;
-                case MotionEvent.ACTION_MOVE:
-                    float currentY = event.getY();
-                    float diff = currentY - startY[0];
-                    
-                    // Ako korisnik vuče nagore, u stranu, ili stranica/panel nisu na vrhu
-                    if (diff < 0 || webView.canScrollVertically(-1) || !refreshBridge.isAtTop()) {
-                        swipeRefreshLayout.setEnabled(false);
-                    } else {
-                        swipeRefreshLayout.setEnabled(true);
-                    }
-                    break;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    // KLJUČNO: Obavezno vraćamo enabled na true i osiguravamo resetovanje praga
-                    swipeRefreshLayout.setEnabled(true);
-                    break;
-            }
-            return false;
-        });
-
-        // Listener koji se okida kada korisnik povuče nadole preko definisanog praga
+        // Listener za osvežavanje kada se pređe prag
         swipeRefreshLayout.setOnRefreshListener(() -> {
             webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
                 if ("false".equals(value)) {
