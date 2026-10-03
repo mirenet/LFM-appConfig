@@ -7,6 +7,7 @@ import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -37,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
-    private RefreshBridge refreshBridge; // Most za praćenje pozicije skrola preko JS-a
+    private RefreshBridge refreshBridge;
 
     private final static int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private final static int MEDIA_PERMISSION_REQUEST_CODE = 101;
@@ -48,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String appConfigJsContent = "";
 
-    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
+    @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded", "ClickableViewAccessibility"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
@@ -83,9 +84,39 @@ public class MainActivity extends AppCompatActivity {
         refreshBridge = new RefreshBridge();
         webView.addJavascriptInterface(refreshBridge, "RefreshBridge");
 
-        // Ključna provera: Ako nismo na vrhu, vrati true (sprečava pull-to-refresh i dozvoljava slobodan skrol)
+        // Ključna provera: Ako nismo na vrhu, sprečavamo refresh
         swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> {
+            if (webView.canScrollVertically(-1)) {
+                return true;
+            }
             return !refreshBridge.isAtTop();
+        });
+
+        // Nativna kontrola dodira i smera povlačenja (sprečava lažno paljenje kružića na prvi dodir)
+        final float[] startY = {0f};
+        swipeRefreshLayout.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    startY[0] = event.getY();
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    float currentY = event.getY();
+                    float diff = currentY - startY[0];
+                    
+                    // Ako korisnik vuče nagore, u stranu ili ako WebView nije na vrhu, 
+                    // privremeno isključujemo SwipeRefreshLayout da ne otima gest
+                    if (diff < 0 || webView.canScrollVertically(-1) || !refreshBridge.isAtTop()) {
+                        swipeRefreshLayout.setEnabled(false);
+                    } else {
+                        swipeRefreshLayout.setEnabled(true);
+                    }
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    swipeRefreshLayout.setEnabled(true);
+                    break;
+            }
+            return false;
         });
 
         // Listener koji se okida kada korisnik povuče nadole na samom vrhu
@@ -222,7 +253,6 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // JS skripta koja pre dolaska prsta na ekran detektuje da li je stranica ili unutrašnji panel na vrhu
                 String refreshBridgeJs = 
                     "(function() {" +
                     "    window.addEventListener('scroll', function() {" +
