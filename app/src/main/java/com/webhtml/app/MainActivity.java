@@ -3,6 +3,7 @@ package com.webhtml.app;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -20,7 +21,11 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
@@ -41,6 +46,9 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback pendingGeolocationCallback;
     private PermissionRequest pendingPermissionRequest;
 
+    // Konfiguracija učitana iz appConfig-a
+    private boolean isRefreshEnabledInConfig = true;
+
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,8 +56,11 @@ public class MainActivity extends AppCompatActivity {
             androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
         );
         super.onCreate(savedInstanceState);
+
+        // 1. Učitavamo konfiguraciju iz appConfig.json (ili sličnog fajla) u assets folderu
+        loadAppConfig();
         
-        // 1. Kreiramo čisti WebView preko celog ekrana (bez SwipeRefreshLayout-a)
+        // 2. Kreiramo čisti WebView preko celog ekrana
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -57,10 +68,8 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        // Postavljamo WebView direktno kao glavni sadržaj
         setContentView(webView);
 
-        // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
 
         WebSettings webSettings = webView.getSettings();
@@ -76,14 +85,11 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setSupportMultipleWindows(false);
         webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
 
-        // Omogućavanje kolačića i kolačića treće strane
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-        // Registrujemo DownloadHelper kao JavaScript Bridge
         webView.addJavascriptInterface(downloadHelper, "AndroidBridge");
 
-        // Moderno upravljanje dugmetom nazad (OnBackPressedDispatcher)
         getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -184,18 +190,22 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Univerzalna lokalna Pull-to-Refresh skripta koja radi na svakom sajtu i lokalnom fajlu
-                String rawPtrInjection = 
+                // Ako je u appConfig-u refresh isključen, ne ubacujemo skriptu
+                if (!isRefreshEnabledInConfig) return;
+
+                // Robustna Pull-to-Refresh skripta sa potpunim praćenjem unutrašnjih panela i touch release-a
+                String robustPtrScript = 
                     "(function() {" +
                     "    if (window._ptrInitialized) return;" +
                     "    window._ptrInitialized = true;" +
                     "    " +
                     "    let startY = 0;" +
+                    "    let currentY = 0;" +
                     "    let pulling = false;" +
                     "    let refreshing = false;" +
                     "    " +
                     "    let indicator = document.createElement('div');" +
-                    "    indicator.style.cssText = 'position:fixed;top:-50px;left:50%;transform:translateX(-50%);width:35px;height:35px;background:#222;border:2px solid #555;border-radius:50%;z-index:999999;display:flex;align-items:center;justify-content:center;transition:top 0.2s;box-shadow:0 2px 5px rgba(0,0,0,0.3);';" +
+                    "    indicator.style.cssText = 'position:fixed;top:-50px;left:50%;transform:translateX(-50%);width:36px;height:36px;background:#1a1a1a;border:2px solid #444;border-radius:50%;z-index:999999;display:flex;align-items:center;justify-content:center;transition:top 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);box-shadow:0 4px 10px rgba(0,0,0,0.5);';" +
                     "    indicator.innerHTML = '<div style=\"width:18px;height:18px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:ptr-spin 0.8s linear infinite;\"></div>';" +
                     "    " +
                     "    let styleSheet = document.createElement('style');" +
@@ -204,50 +214,64 @@ public class MainActivity extends AppCompatActivity {
                     "    document.body.appendChild(indicator);" +
                     "    " +
                     "    window.addEventListener('touchstart', function(e) {" +
-                    "        if (window.pageYOffset <= 0) {" +
-                    "            let el = e.target;" +
-                    "            let inScrollable = false;" +
-                    "            while (el && el !== document.body) {" +
-                    "                let style = window.getComputedStyle(el);" +
-                    "                let oy = style.getPropertyValue('overflow-y');" +
-                    "                if ((oy === 'auto' || oy === 'scroll') && el.scrollTop > 0) {" +
-                    "                    inScrollable = true;" +
+                    "        if (refreshing) return;" +
+                    "        startY = e.touches[0].clientY;" +
+                    "        currentY = startY;" +
+                    "        " +
+                    "        let el = e.target;" +
+                    "        let isInsideScrollable = false;" +
+                    "        " +
+                    "        while (el && el !== document.body && el !== document.documentElement) {" +
+                    "            let style = window.getComputedStyle(el);" +
+                    "            let oy = style.getPropertyValue('overflow-y');" +
+                    "            if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') {" +
+                    "                if (el.scrollTop > 0) {" +
+                    "                    isInsideScrollable = true;" +
                     "                    break;" +
                     "                }" +
-                    "                el = el.parentElement;" +
                     "            }" +
-                    "            if (!inScrollable) {" +
-                    "                startY = e.touches[0].clientY;" +
-                    "                pulling = true;" +
-                    "            }" +
+                    "            el = el.parentElement;" +
+                    "        }" +
+                    "        " +
+                    "        if (!isInsideScrollable && window.pageYOffset <= 0) {" +
+                    "            pulling = true;" +
+                    "        } else {" +
+                    "            pulling = false;" +
                     "        }" +
                     "    }, {passive: true});" +
                     "    " +
                     "    window.addEventListener('touchmove', function(e) {" +
                     "        if (!pulling || refreshing) return;" +
-                    "        let y = e.touches[0].clientY;" +
-                    "        let diff = y - startY;" +
+                    "        currentY = e.touches[0].clientY;" +
+                    "        let diff = currentY - startY;" +
+                    "        " +
                     "        if (diff > 0 && window.pageYOffset <= 0) {" +
-                    "            let pullDistance = Math.min(diff * 0.4, 80);" +
-                    "            indicator.style.top = (pullDistance - 40) + 'px';" +
-                    "            if (pullDistance > 60) {" +
-                    "                refreshing = true;" +
-                    "                pulling = false;" +
-                    "                indicator.style.top = '20px';" +
-                    "                setTimeout(function() { window.location.reload(); }, 400);" +
-                    "            }" +
+                    "            let pullDistance = Math.min(diff * 0.45, 90);" +
+                    "            indicator.style.top = (pullDistance - 45) + 'px';" +
+                    "        } else {" +
+                    "            pulling = false;" +
+                    "            indicator.style.top = '-50px';" +
                     "        }" +
                     "    }, {passive: true});" +
                     "    " +
-                    "    window.addEventListener('touchend', function() {" +
-                    "        if (!refreshing) {" +
-                    "            pulling = false;" +
+                    "    window.addEventListener('touchend', function(e) {" +
+                    "        if (!pulling || refreshing) return;" +
+                    "        pulling = false;" +
+                    "        " +
+                    "        let diff = currentY - startY;" +
+                    "        if (diff > 110 && window.pageYOffset <= 0) {" +
+                    "            refreshing = true;" +
+                    "            indicator.style.top = '25px';" +
+                    "            setTimeout(function() {" +
+                    "                window.location.reload();" +
+                    "            }, 500);" +
+                    "        } else {" +
                     "            indicator.style.top = '-50px';" +
                     "        }" +
                     "    }, {passive: true});" +
                     "})();";
 
-                view.evaluateJavascript(rawPtrInjection, null);
+                view.evaluateJavascript(robustPtrScript, null);
             }
             
             @Override
@@ -411,6 +435,30 @@ public class MainActivity extends AppCompatActivity {
             }
         } else {
             webView.loadUrl("file:///android_asset/index.html");
+        }
+    }
+
+    // Pomoćna metoda za čitanje konfiguracije iz assets foldera
+    private void loadAppConfig() {
+        try {
+            AssetManager assetManager = getAssets();
+            InputStream is = assetManager.open("appConfig.json"); // Prilagodi naziv fajla ako se drugačije zove u assets
+            BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            reader.close();
+
+            JSONObject configJson = new JSONObject(sb.toString());
+            // Proveravamo polje za refresh u konfiguraciji (prilagodi ključ nazivu u tvom json-u)
+            if (configJson.has("enableRefresh")) {
+                isRefreshEnabledInConfig = configJson.getBoolean("enableRefresh");
+            }
+        } catch (Exception e) {
+            // Ako fajl ne postoji ili je drugačijeg formata, podrazumevamo da je dozvoljeno ili zadržavamo default
+            isRefreshEnabledInConfig = true;
         }
     }
 
