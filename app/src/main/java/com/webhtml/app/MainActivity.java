@@ -514,7 +514,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
-        if (requestCode == FILE_CHOOS.class.getName().hashCode() || requestCode == FILE_CHOOSER_RESULT_CODE) {
+        if (requestCode == FILE_CHOOSER_RESULT_CODE) {
             if (uploadMessage == null) return;
             Uri[] results = null;
             if (resultCode == Activity.RESULT_OK && intent != null) {
