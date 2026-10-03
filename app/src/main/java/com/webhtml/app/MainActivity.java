@@ -74,6 +74,7 @@ public class MainActivity extends AppCompatActivity {
         "    window.addEventListener('touchstart', function (e) {" +
         "        startY = e.touches[0].clientY;" +
         "        activeScrollElement = getScrollableParent(e.target);" +
+        "        // U startu uvek gasimo da sprečimo brzu otmicu gesta" +
         "        if (window.PtrControl) window.PtrControl.setSwipeEnabled(false);" +
         "    }, { passive: true });" +
         "    " +
@@ -81,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
         "        let currentY = e.touches[0].clientY;" +
         "        let diff = currentY - startY;" +
         "        " +
+        "        // Čekamo minimalni prag pomeranja" +
         "        if (diff <= 5) return;" +
         "        " +
         "        if (window.scrollY === 0) {" +
@@ -128,6 +130,9 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT, 
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
+
+        // **KLJUČNA IZMENA:** U startu ga potpuno gasimo da Android ne otima gest automatski
+        swipeRefreshLayout.setEnabled(false);
 
         // Kreiramo WebView
         webView = new WebView(this);
