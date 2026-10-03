@@ -20,6 +20,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -32,7 +33,7 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private GoNativeSwipeRefreshLayout swipeRefreshLayout; // Naš nativni PTR kontejner
+    private SwipeRefreshLayout swipeRefreshLayout; // Standardni nativni AndroidX SwipeRefreshLayout
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -56,8 +57,8 @@ public class MainActivity extends AppCompatActivity {
 
         loadAppConfigJs();
         
-        // 1. Inicijalizujemo nativni SwipeRefreshLayout preko celog ekrana
-        swipeRefreshLayout = new GoNativeSwipeRefreshLayout(this);
+        // 1. Inicijalizujemo standardni AndroidX SwipeRefreshLayout preko celog ekrana
+        swipeRefreshLayout = new SwipeRefreshLayout(this);
         swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -74,12 +75,16 @@ public class MainActivity extends AppCompatActivity {
         // 3. Ubacujemo WebView unutar SwipeRefreshLayout-a
         swipeRefreshLayout.addView(webView);
 
-        // 4. Postavljamo glavnu aktivnost da prikazuje SwipeRefreshLayout (koji u sebi nosi WebView)
+        // 4. Postavljamo glavnu aktivnost da prikazuje SwipeRefreshLayout
         setContentView(swipeRefreshLayout);
 
-        // Listener koji se okida kada korisnik povuče nadole
+        // Ključna provera: Sprečava aktivaciju pull-to-refresh-a ako je unutrašnji panel/div skrolovan
+        swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> {
+            return webView.getScrollY() > 0 || webView.canScrollVertically(-1);
+        });
+
+        // Listener koji se okida kada korisnik povuče nadole na samom vrhu
         swipeRefreshLayout.setOnRefreshListener(() -> {
-            // Provera preko AppConfig-a da li je refresh dozvoljen
             webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
                 if ("false".equals(value)) {
                     swipeRefreshLayout.setRefreshing(false);
@@ -204,7 +209,6 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
-                // Čim se stranica učita, sklanjamo nativni spiner ako je bio aktivan
                 if (swipeRefreshLayout != null) {
                     swipeRefreshLayout.setRefreshing(false);
                 }
@@ -213,7 +217,6 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Ubacujemo samo appConfig.js ukoliko postoji
                 String combinedScript = 
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
