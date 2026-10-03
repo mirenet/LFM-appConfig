@@ -66,8 +66,7 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        // Postavljamo ogroman prag (40% visine ekrana) da se pull-to-refresh 
-        // ne može aktivirati slučajno, već samo uz dubok i svestan pokret nadole
+        // Postavljamo prag (40% visine ekrana) da se pull-to-refresh ne aktivira slučajno
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
         int triggerDistance = (int) (screenHeight * 0.4); 
         swipeRefreshLayout.setDistanceToTriggerSync(triggerDistance);
@@ -98,7 +97,7 @@ public class MainActivity extends AppCompatActivity {
             return !refreshBridge.isAtTop();
         });
 
-        // Nativna kontrola dodira i smera povlačenja
+        // Stabilna nativna kontrola dodira sa osiguranim resetovanjem stanja u ACTION_UP
         final float[] startY = {0f};
         swipeRefreshLayout.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
@@ -109,8 +108,7 @@ public class MainActivity extends AppCompatActivity {
                     float currentY = event.getY();
                     float diff = currentY - startY[0];
                     
-                    // Ako korisnik vuče nagore, u stranu ili ako WebView nije na vrhu, 
-                    // privremeno isključujemo SwipeRefreshLayout da ne otima gest
+                    // Ako korisnik vuče nagore, u stranu, ili stranica/panel nisu na vrhu
                     if (diff < 0 || webView.canScrollVertically(-1) || !refreshBridge.isAtTop()) {
                         swipeRefreshLayout.setEnabled(false);
                     } else {
@@ -119,6 +117,7 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
+                    // KLJUČNO: Obavezno vraćamo enabled na true i osiguravamo resetovanje praga
                     swipeRefreshLayout.setEnabled(true);
                     break;
             }
