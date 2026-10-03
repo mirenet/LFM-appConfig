@@ -32,11 +32,11 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
+    private GoNativeSwipeRefreshLayout swipeRefreshLayout; // Naš nativni PTR kontejner
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
 
-    // Kodovi i promenljive za sistemske dozvole u hodu
     private final static int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private final static int MEDIA_PERMISSION_REQUEST_CODE = 101;
     
@@ -44,100 +44,7 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback pendingGeolocationCallback;
     private PermissionRequest pendingPermissionRequest;
 
-    // Sadržaj appConfig.js fajla pročitan iz assets-a
     private String appConfigJsContent = "";
-
-    // Pouzdana čista JavaScript skripta za Pull-to-Refresh sa spinerom
-    private final String customPtrJsContent = 
-        "(function () {" +
-        "    if (window._customPtrLoaded) return;" +
-        "    window._customPtrLoaded = true;" +
-        "    " +
-        "    const style = document.createElement('style');" +
-        "    style.innerHTML = `" +
-        "        #custom-ptr-spinner {" +
-        "            position: fixed;" +
-        "            top: -50px;" +
-        "            left: 50%;" +
-        "            transform: translateX(-50%);" +
-        "            width: 38px;" +
-        "            height: 38px;" +
-        "            background: #1a1a1a;" +
-        "            border: 2px solid #333;" +
-        "            border-top: 2px solid #3498db;" +
-        "            border-radius: 50%;" +
-        "            z-index: 999999;" +
-        "            transition: top 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);" +
-        "            display: flex;" +
-        "            align-items: center;" +
-        "            justify-content: center;" +
-        "            box-shadow: 0 4px 12px rgba(0,0,0,0.5);" +
-        "        }" +
-        "        #custom-ptr-spinner.spinning {" +
-        "            animation: ptr-spin 0.8s linear infinite;" +
-        "        }" +
-        "        @keyframes ptr-spin {" +
-        "            0% { transform: translateX(-50%) rotate(0deg); }" +
-        "            100% { transform: translateX(-50%) rotate(360deg); }" +
-        "        }" +
-        "    `;" +
-        "    document.head.appendChild(style);" +
-        "    " +
-        "    const spinner = document.createElement('div');" +
-        "    spinner.id = 'custom-ptr-spinner';" +
-        "    document.body.appendChild(spinner);" +
-        "    " +
-        "    let startY = 0;" +
-        "    let pulling = false;" +
-        "    let refreshing = false;" +
-        "    " +
-        "    window.addEventListener('touchstart', function (e) {" +
-        "        if (window.scrollY <= 2 && !refreshing) {" +
-        "            startY = e.touches[0].clientY;" +
-        "            pulling = true;" +
-        "        } else {" +
-        "            pulling = false;" +
-        "        }" +
-        "    }, { passive: true });" +
-        "    " +
-        "    window.addEventListener('touchmove', function (e) {" +
-        "        if (!pulling || refreshing) return;" +
-        "        let currentY = e.touches[0].clientY;" +
-        "        let diff = currentY - startY;" +
-        "        " +
-        "        if (window.scrollY > 2) {" +
-        "            pulling = false;" +
-        "            spinner.style.top = '-50px';" +
-        "            return;" +
-        "        }" +
-        "        " +
-        "        if (diff > 0) {" +
-        "            let pullDistance = Math.min(diff * 0.4, 90);" +
-        "            spinner.style.top = (pullDistance - 45) + 'px';" +
-        "            if (diff > 110) {" +
-        "                spinner.style.borderColor = '#3498db';" +
-        "            }" +
-        "        }" +
-        "    }, { passive: true });" +
-        "    " +
-        "    window.addEventListener('touchend', function (e) {" +
-        "        if (!pulling || refreshing) return;" +
-        "        pulling = false;" +
-        "        let diff = (e.changedTouches[0] ? e.changedTouches[0].clientY : startY) - startY;" +
-        "        " +
-        "        if (diff > 110 && window.scrollY <= 2) {" +
-        "            refreshing = true;" +
-        "            spinner.classList.add('spinning');" +
-        "            spinner.style.top = '25px';" +
-        "            setTimeout(() => {" +
-        "                window.location.reload();" +
-        "            }, 300);" +
-        "        } else {" +
-        "            spinner.style.top = '-50px';" +
-        "            spinner.classList.remove('spinning');" +
-        "        }" +
-        "    }, { passive: true });" +
-        "})();";
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -147,10 +54,16 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
 
-        // Čitamo konfiguraciju iz assets foldera
         loadAppConfigJs();
         
-        // Kreiramo WebView kao direktan i glavni prikaz preko celog ekrana
+        // 1. Inicijalizujemo nativni SwipeRefreshLayout preko celog ekrana
+        swipeRefreshLayout = new GoNativeSwipeRefreshLayout(this);
+        swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        // 2. Kreiramo WebView
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -158,7 +71,23 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        setContentView(webView);
+        // 3. Ubacujemo WebView unutar SwipeRefreshLayout-a
+        swipeRefreshLayout.addView(webView);
+
+        // 4. Postavljamo glavnu aktivnost da prikazuje SwipeRefreshLayout (koji u sebi nosi WebView)
+        setContentView(swipeRefreshLayout);
+
+        // Listener koji se okida kada korisnik povuče nadole
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            // Provera preko AppConfig-a da li je refresh dozvoljen
+            webView.evaluateJavascript("typeof AppConfig !== 'undefined' ? AppConfig.refresh : true;", value -> {
+                if ("false".equals(value)) {
+                    swipeRefreshLayout.setRefreshing(false);
+                } else {
+                    webView.reload();
+                }
+            });
+        });
 
         downloadHelper = new DownloadHelper(this);
 
@@ -229,8 +158,7 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                return handleUrlLoading(view, url);
+                return handleUrlLoading(view, request.getUrl().toString());
             }
 
             @Override
@@ -276,15 +204,19 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
 
+                // Čim se stranica učita, sklanjamo nativni spiner ako je bio aktivan
+                if (swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
+                // Ubacujemo samo appConfig.js ukoliko postoji
                 String combinedScript = 
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
-                    "    if (typeof AppConfig !== 'undefined' && AppConfig.refresh === false) return;" +
-                    "    " + customPtrJsContent +
                     "})();";
 
                 view.evaluateJavascript(combinedScript, null);
@@ -294,7 +226,6 @@ public class MainActivity extends AppCompatActivity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String urlStr = request.getUrl().toString();
                 
-                // VAŽNO: Preskačemo lokalne fajlove i assete da ne bi pucalo učitavanje aplikacije!
                 if (urlStr.startsWith("file://") || !urlStr.contains("#")) {
                     return super.shouldInterceptRequest(view, request);
                 }
