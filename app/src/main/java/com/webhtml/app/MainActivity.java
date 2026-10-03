@@ -1,15 +1,15 @@
 package com.webhtml.app;
 
+import com.webhtml.app.R;
+
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
-import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -20,7 +20,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -30,11 +29,11 @@ import java.net.URLDecoder;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
 
+    // Kodovi i promenljive za sistemske dozvole u hodu
     private final static int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private final static int MEDIA_PERMISSION_REQUEST_CODE = 101;
     
@@ -50,35 +49,9 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        setContentView(R.layout.activity_main);
-
-        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
-        webView = findViewById(R.id.webView);
-        
+        webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#070707"));
-
-        // Podešavanje SwipeRefreshLayout-a (boja spinnera i pozadina)
-        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#1F1F1F"));
-        swipeRefreshLayout.setColorSchemeColors(Color.WHITE);
-
-        // Akcija kada korisnik povuče nadole
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            if (webView != null) {
-                webView.reload();
-            }
-        });
-
-        // PAMETNO REŠENJE: JavaScript bridge preko kog kontrolišemo SwipeRefreshLayout
-        webView.addJavascriptInterface(new Object() {
-            @JavascriptInterface
-            public void setSwipeEnabled(final boolean enabled) {
-                runOnUiThread(() -> {
-                    if (swipeRefreshLayout != null) {
-                        swipeRefreshLayout.setEnabled(enabled);
-                    }
-                });
-            }
-        }, "SwipeController");
+        setContentView(webView);
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -96,12 +69,14 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setSupportMultipleWindows(false);
         webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
 
+        // Omogućavanje kolačića i kolačića treće strane
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
+        // Registrujemo DownloadHelper kao JavaScript Bridge
         webView.addJavascriptInterface(downloadHelper, "AndroidBridge");
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
 
+        // Moderno upravljanje dugmetom nazad (OnBackPressedDispatcher)
         getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -170,6 +145,7 @@ public class MainActivity extends AppCompatActivity {
                         Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
                         if (intent != null) {
                             intent.addCategory(Intent.CATEGORY_BROWSABLE);
+                            
                             try {
                                 startActivity(intent);
                                 return true;
@@ -181,7 +157,9 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             }
                         }
-                    } catch (Exception e) {}
+                    } catch (Exception e) {
+                        // Greška pri parsiranju
+                    }
                     return true;
                 }
 
@@ -197,35 +175,8 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                
-                // Ubacujemo JavaScript koji proverava da li je prst na skrolabilnom panelu ili dnu stranice
-                String jsFix = "document.addEventListener('touchstart', function(e) {" +
-                        "  var target = e.target;" +
-                        "  var isAtTop = true;" +
-                        "  while (target && target !== document.body) {" +
-                        "    var overflowY = window.getComputedStyle(target).overflowY;" +
-                        "    if ((overflowY === 'auto' || overflowY === 'scroll') && target.scrollTop > 0) {" +
-                        "      isAtTop = false;" +
-                        "      break;" +
-                        "    }" +
-                        "    target = target.parentElement;" +
-                        "  }" +
-                        "  if (window.pageYOffset > 0) {" +
-                        "    isAtTop = false;" +
-                        "  }" +
-                        "  if (window.SwipeController) {" +
-                        "    window.SwipeController.setSwipeEnabled(isAtTop);" +
-                        "  }" +
-                        "}, {passive: true});";
-
-                view.evaluateJavascript(jsFix, null);
-
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
-                }
-
-                if (swipeRefreshLayout != null) {
-                    swipeRefreshLayout.setRefreshing(false);
                 }
             }
             
@@ -294,7 +245,9 @@ public class MainActivity extends AppCompatActivity {
 
                     return new WebResourceResponse(mimeType.split(";")[0].trim(), encoding, inputStream);
 
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                    // Fallback
+                }
                 
                 return super.shouldInterceptRequest(view, request);
             }
