@@ -9,7 +9,6 @@ import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
-import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -20,7 +19,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -31,7 +29,6 @@ import java.util.ArrayList;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -44,22 +41,6 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback pendingGeolocationCallback;
     private PermissionRequest pendingPermissionRequest;
 
-    // JavaScript Bridge klasa za kontrolu SwipeRefreshLayout-a iz HTML/JS panela
-    public static class SwipeBridge {
-        private final SwipeRefreshLayout swipeLayout;
-
-        public SwipeBridge(SwipeRefreshLayout swipeLayout) {
-            this.swipeLayout = swipeLayout;
-        }
-
-        @JavascriptInterface
-        public void setSwipeEnabled(final boolean enabled) {
-            if (swipeLayout != null) {
-                swipeLayout.post(() -> swipeLayout.setEnabled(enabled));
-            }
-        }
-    }
-
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,14 +49,7 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        // 1. Dinamički kreiramo SwipeRefreshLayout kao glavni kontejner preko celog ekrana
-        swipeRefreshLayout = new SwipeRefreshLayout(this);
-        swipeRefreshLayout.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
-        // 2. Dinamički kreiramo WebView
+        // 1. Kreiramo samo čisti WebView preko celog ekrana (bez SwipeRefreshLayout-a)
         webView = new WebView(this);
         webView.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 
@@ -83,14 +57,8 @@ public class MainActivity extends AppCompatActivity {
         ));
         webView.setBackgroundColor(Color.parseColor("#070707"));
 
-        // 3. Ubacujemo WebView unutar SwipeRefreshLayout-a i postavljamo kao UI
-        swipeRefreshLayout.addView(webView);
-        setContentView(swipeRefreshLayout);
-
-        // Podešavanje Pull-to-Refresh listener-a (osvežavanje cele stranice)
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            webView.reload();
-        });
+        // Postavljamo WebView direktno kao glavni sadržaj
+        setContentView(webView);
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -112,9 +80,8 @@ public class MainActivity extends AppCompatActivity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-        // Registrujemo DownloadHelper i SwipeBridge kao JavaScript Bridge
+        // Registrujemo DownloadHelper kao JavaScript Bridge
         webView.addJavascriptInterface(downloadHelper, "AndroidBridge");
-        webView.addJavascriptInterface(new SwipeBridge(swipeRefreshLayout), "SwipeControlBridge");
 
         // Moderno upravljanje dugmetom nazad (OnBackPressedDispatcher)
         getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
@@ -212,50 +179,32 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                
-                // Sakrij kružić za osvežavanje kada se stranica učita
-                if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
-                    swipeRefreshLayout.setRefreshing(false);
-                }
 
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Univerzalna skripta koja se ubacuje u svaki sajt u letu (bez menjanja HTML-a)
-                String universalJsInjection = 
+                // Ubacujemo pulltorefresh.js biblioteku direktno u svaku stranicu u letu
+                String ptrScript = 
                     "(function() {" +
-                    "    if (window._hasSwipeScript) return;" +
-                    "    window._hasSwipeScript = true;" +
-                    "    " +
-                    "    window.addEventListener('touchstart', function(e) {" +
-                    "        let el = e.target;" +
-                    "        let canScrollInside = false;" +
-                    "        " +
-                    "        while (el && el !== document.body && el !== document.documentElement) {" +
-                    "            let style = window.getComputedStyle(el);" +
-                    "            let overflowY = style.getPropertyValue('overflow-y');" +
-                    "            let isScrollable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay');" +
-                    "            " +
-                    "            if (isScrollable && el.scrollHeight > el.clientHeight) {" +
-                    "                if (el.scrollTop > 1) {" +
-                    "                    canScrollInside = true;" +
-                    "                    break;" +
-                    "                }" +
+                    "    if (window.PullToRefresh) return;" +
+                    "    var script = document.createElement('script');" +
+                    "    script.src = 'https://unpkg.com/pulltorefreshjs@0.1.22/dist/pulltorefresh.js';" +
+                    "    script.onload = function() {" +
+                    "        PullToRefresh.init({" +
+                    "            mainElement: 'body'," +
+                    "            shouldPullToRefresh: function() {" +
+                    "                return window.scrollY === 0;" +
+                    "            }," +
+                    "            onRefresh: function() {" +
+                    "                window.location.reload();" +
                     "            }" +
-                    "            el = el.parentElement;" +
-                    "        }" +
-                    "        " +
-                    "        let pageScrollY = window.pageYOffset || document.documentElement.scrollTop;" +
-                    "        if (canScrollInside || pageScrollY > 5) {" +
-                    "            window.SwipeControlBridge.setSwipeEnabled(false);" +
-                    "        } else {" +
-                    "            window.SwipeControlBridge.setSwipeEnabled(true);" +
-                    "        }" +
-                    "    }, {passive: true});" +
+                    "        });" +
+                    "    };" +
+                    "    document.head.appendChild(script);" +
                     "})();";
 
-                view.evaluateJavascript(universalJsInjection, null);
+                view.evaluateJavascript(ptrScript, null);
             }
             
             @Override
