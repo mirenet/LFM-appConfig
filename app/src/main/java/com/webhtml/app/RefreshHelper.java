@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Color;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
+import android.view.View; // <--- OVO JE FALILO
 import android.view.ViewConfiguration;
 import android.webkit.WebView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -51,26 +52,24 @@ public class RefreshHelper extends SwipeRefreshLayout {
                 startY = ev.getY();
                 isInternalScrolling = false;
 
-                // Sinhrona/brza provera preko JS-a da li je element pod prstom pomeren sa vrha
                 String js = "(function() {" +
                         "  var el = document.elementFromPoint(" + startX + ", " + startY + ");" +
                         "  while (el && el !== document.body && el !== document.documentElement) {" +
                         "    var style = window.getComputedStyle(el);" +
                         "    var overflowY = style.getPropertyValue('overflow-y');" +
                         "    if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {" +
-                        "      if (el.scrollTop > 2) {" + // Ako je unutrašnji panel skrolovan nadole bar 2 piksela
+                        "      if (el.scrollTop > 2) {" +
                         "        return 'BUSY';" +
                         "      }" +
                         "    }" +
                         "    el = el.parentElement;" +
                         "  }" +
-                        "  if (window.scrollY > 2) {" + // Ako je cela stranica skrolovana
+                        "  if (window.scrollY > 2) {" +
                         "    return 'BUSY';" +
                         "  }" +
                         "  return 'FREE';" +
                         "})();";
 
-                // Pošto evaluateJavascript vraća rezultat kroz callback, ovde hvatamo flag
                 webView.evaluateJavascript(js, result -> {
                     if (result != null && result.contains("BUSY")) {
                         isInternalScrolling = true;
@@ -82,9 +81,8 @@ public class RefreshHelper extends SwipeRefreshLayout {
                 float diffY = ev.getY() - startY;
                 float diffX = Math.abs(ev.getX() - startX);
 
-                // Ako korisnik vuče nadole (refresh gest), a nalazimo se u skrolovanom unutrašnjem elementu
                 if (diffY > touchSlop && diffY > diffX && isInternalScrolling) {
-                    return false; // Strogo zabrani SwipeRefreshLayout-u da preuzme gest!
+                    return false;
                 }
                 break;
         }
