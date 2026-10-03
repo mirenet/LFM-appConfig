@@ -7,7 +7,6 @@ import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JsResult;
@@ -29,7 +28,6 @@ import java.net.URLDecoder;
 public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
-    private RefreshHelper refreshHelper;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
     private DownloadHelper downloadHelper;
@@ -50,17 +48,9 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
         
-        // Inicijalizujemo naš RefreshHelper
-        refreshHelper = new RefreshHelper(this);
-
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#070707"));
-        
-        // Dodajemo WebView unutar RefreshHelper-a preko ViewGroup parametara
-        refreshHelper.addView(webView, new ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        
-        setContentView(refreshHelper);
+        setContentView(webView); // Direktno postavljamo WebView bez RefreshHelper-a
 
         // Inicijalizujemo DownloadHelper
         downloadHelper = new DownloadHelper(this);
@@ -148,18 +138,15 @@ public class MainActivity extends AppCompatActivity {
             }
 
             private boolean handleUrlLoading(WebView view, String url) {
-                // 1. Dozvoli lokalnim fajlovima i standardnim web linkovima da se učitaju u WebView-u normalno
                 if (url.startsWith("file://") || url.startsWith("http://") || url.startsWith("https://")) {
                     return false; 
                 }
                 
-                // 2. Ako je intent:// link, parsiraj ga i pokreni spoljnu aplikaciju
                 if (url.startsWith("intent://")) {
                     try {
                         Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
                         if (intent != null) {
                             intent.addCategory(Intent.CATEGORY_BROWSABLE);
-                            
                             try {
                                 startActivity(intent);
                                 return true;
@@ -171,13 +158,10 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             }
                         }
-                    } catch (Exception e) {
-                        // Greška pri parsiranju
-                    }
+                    } catch (Exception e) {}
                     return true;
                 }
 
-                // 3. Za ostale sistemske protokole (tel:, mailto:, market:, itd.)
                 try {
                     Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                     view.getContext().startActivity(intent);
@@ -191,14 +175,56 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 
-                // Gasimo spiner za pull-to-refresh kada se stranica potpuno učita
-                if (refreshHelper != null) {
-                    refreshHelper.setRefreshing(false);
-                }
-
                 if (url != null && url.startsWith("file://")) {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
+
+                // INJEKCIJA PULL-TO-REFRESH SKRIPTE (Kao u Soul/Via brauzeru)
+                String injectionScript = "(function() {" +
+                        "  if (!document.getElementById('native-ptr-style')) {" +
+                        "    var style = document.createElement('style');" +
+                        "    style.id = 'native-ptr-style';" +
+                        "    style.innerHTML = '#ptr-spinner { position: fixed; top: -50px; left: 50%; transform: translateX(-50%); width: 40px; height: 40px; background: #1F1F1F; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; transition: top 0.2s ease; z-index: 99999; } " +
+                        "                       #ptr-spinner.visible { top: 20px; } " +
+                        "                       #ptr-spinner .ptr-icon { width: 20px; height: 20px; border: 2px solid #FFF; border-top-color: transparent; border-radius: 50%; animation: ptr-spin 0.8s linear infinite; } " +
+                        "                       @keyframes ptr-spin { to { transform: rotate(360deg); } }';" +
+                        "    document.head.appendChild(style);" +
+                        "  }" +
+                        "  if (!document.getElementById('ptr-spinner')) {" +
+                        "    var div = document.createElement('div');" +
+                        "    div.id = 'ptr-spinner';" +
+                        "    div.innerHTML = '<div class=\"ptr-icon\"></div>';" +
+                        "    document.body.appendChild(div);" +
+                        "  }" +
+                        "  if (!window.hasPtrInitialized) {" +
+                        "    window.hasPtrInitialized = true;" +
+                        "    let startY = 0, refreshing = false;" +
+                        "    window.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, {passive: true});" +
+                        "    window.addEventListener('touchmove', e => {" +
+                        "      if (refreshing) return;" +
+                        "      let diff = e.touches[0].clientY - startY;" +
+                        "      if (diff > 60) {" +
+                        "        let el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);" +
+                        "        let canRefresh = true;" +
+                        "        while (el && el !== document.body && el !== document.documentElement) {" +
+                        "          let style = window.getComputedStyle(el);" +
+                        "          let overflowY = style.getPropertyValue('overflow-y');" +
+                        "          if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {" +
+                        "            if (el.scrollTop > 5) { canRefresh = false; break; }" +
+                        "          }" +
+                        "          el = el.parentElement;" +
+                        "        }" +
+                        "        if (window.scrollY > 5) canRefresh = false;" +
+                        "        if (canRefresh) {" +
+                        "          refreshing = true;" +
+                        "          document.getElementById('ptr-spinner').classList.add('visible');" +
+                        "          setTimeout(() => { window.location.reload(); }, 400);" +
+                        "        }" +
+                        "      }" +
+                        "    }, {passive: true});" +
+                        "  }" +
+                        "})();";
+                view.evaluateJavascript(injectionScript, null);
             }
             
             @Override
@@ -266,17 +292,10 @@ public class MainActivity extends AppCompatActivity {
 
                     return new WebResourceResponse(mimeType.split(";")[0].trim(), encoding, inputStream);
 
-                } catch (Exception e) {
-                    // Fallback
-                }
+                } catch (Exception e) {}
                 
                 return super.shouldInterceptRequest(view, request);
             }
-        });
-
-        // Konfigurisanje akcije za naš custom Pull-to-Refresh
-        refreshHelper.setOnRefreshListener(() -> {
-            webView.reload();
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
@@ -287,7 +306,6 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
 
-            // Standardno sistemsko traženje geolokacije
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
                 if (androidx.core.content.ContextCompat.checkSelfPermission(MainActivity.this, 
@@ -302,7 +320,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            // Standardno sistemsko traženje kamere i mikrofona
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 String[] requestedResources = request.getResources();
@@ -359,7 +376,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Provera intenta pri pokretanju
         Intent intent = getIntent();
         Uri data = intent != null ? intent.getData() : null;
 
@@ -391,7 +407,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Obrada odgovora korisnika na sistemski prozor za dozvole
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
