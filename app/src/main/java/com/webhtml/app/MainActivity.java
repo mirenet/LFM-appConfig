@@ -44,8 +44,9 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback pendingGeolocationCallback;
     private PermissionRequest pendingPermissionRequest;
 
-    // Sadržaj appConfig.js fajla pročitan iz assets-a
+    // Sadržaj appConfig.js i pulltorefresh.js fajlova pročitan iz assets-a
     private String appConfigJsContent = "";
+    private String pullToRefreshJsContent = "";
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -55,8 +56,9 @@ public class MainActivity extends AppCompatActivity {
         );
         super.onCreate(savedInstanceState);
 
-        // 1. Čitamo appConfig.js iz assets foldera
+        // 1. Čitamo konfiguraciju i pull to refresh skriptu iz assets foldera
         loadAppConfigJs();
+        loadPullToRefreshJs();
         
         // 2. Kreiramo čisti WebView preko celog ekrana
         webView = new WebView(this);
@@ -188,7 +190,7 @@ public class MainActivity extends AppCompatActivity {
                     view.evaluateJavascript("window.webhtml = true;", null);
                 }
 
-                // Injektujemo appConfig.js i pull-to-refresh logiku koja ga poštuje
+                // Injektujemo appConfig.js, pulltorefresh.js biblioteku i inicijalizujemo je
                 String combinedScript = 
                     "(function() {" +
                     "    try { " + appConfigJsContent + " } catch(e) {}" +
@@ -196,76 +198,16 @@ public class MainActivity extends AppCompatActivity {
                     "    if (window._ptrInitialized) return;" +
                     "    window._ptrInitialized = true;" +
                     "    " +
-                    "    let startY = 0;" +
-                    "    let currentY = 0;" +
-                    "    let pulling = false;" +
-                    "    let refreshing = false;" +
+                    pullToRefreshJsContent +
                     "    " +
-                    "    let indicator = document.createElement('div');" +
-                    "    indicator.style.cssText = 'position:fixed;top:-50px;left:50%;transform:translateX(-50%);width:36px;height:36px;background:#1a1a1a;border:2px solid #444;border-radius:50%;z-index:999999;display:flex;align-items:center;justify-content:center;transition:top 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);box-shadow:0 4px 10px rgba(0,0,0,0.5);';" +
-                    "    indicator.innerHTML = '<div style=\"width:18px;height:18px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:ptr-spin 0.8s linear infinite;\"></div>';" +
-                    "    " +
-                    "    let styleSheet = document.createElement('style');" +
-                    "    styleSheet.innerHTML = '@keyframes ptr-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';" +
-                    "    document.head.appendChild(styleSheet);" +
-                    "    document.body.appendChild(indicator);" +
-                    "    " +
-                    "    window.addEventListener('touchstart', function(e) {" +
-                    "        if (refreshing) return;" +
-                    "        startY = e.touches[0].clientY;" +
-                    "        currentY = startY;" +
-                    "        " +
-                    "        let el = e.target;" +
-                    "        let isInsideScrollable = false;" +
-                    "        " +
-                    "        while (el && el !== document.body && el !== document.documentElement) {" +
-                    "            let style = window.getComputedStyle(el);" +
-                    "            let oy = style.getPropertyValue('overflow-y');" +
-                    "            if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') {" +
-                    "                if (el.scrollTop > 0) {" +
-                    "                    isInsideScrollable = true;" +
-                    "                    break;" +
-                    "                }" +
-                    "            }" +
-                    "            el = el.parentElement;" +
-                    "        }" +
-                    "        " +
-                    "        if (!isInsideScrollable && window.pageYOffset <= 0) {" +
-                    "            pulling = true;" +
-                    "        } else {" +
-                    "            pulling = false;" +
-                    "        }" +
-                    "    }, {passive: true});" +
-                    "    " +
-                    "    window.addEventListener('touchmove', function(e) {" +
-                    "        if (!pulling || refreshing) return;" +
-                    "        currentY = e.touches[0].clientY;" +
-                    "        let diff = currentY - startY;" +
-                    "        " +
-                    "        if (diff > 0 && window.pageYOffset <= 0) {" +
-                    "            let pullDistance = Math.min(diff * 0.45, 90);" +
-                    "            indicator.style.top = (pullDistance - 45) + 'px';" +
-                    "        } else {" +
-                    "            pulling = false;" +
-                    "            indicator.style.top = '-50px';" +
-                    "        }" +
-                    "    }, {passive: true});" +
-                    "    " +
-                    "    window.addEventListener('touchend', function(e) {" +
-                    "        if (!pulling || refreshing) return;" +
-                    "        pulling = false;" +
-                    "        " +
-                    "        let diff = currentY - startY;" +
-                    "        if (diff > 110 && window.pageYOffset <= 0) {" +
-                    "            refreshing = true;" +
-                    "            indicator.style.top = '25px';" +
-                    "            setTimeout(function() {" +
+                    "    if (typeof PullToRefresh !== 'undefined') {" +
+                    "        PullToRefresh.init({" +
+                    "            mainElement: 'body'," +
+                    "            onRefresh: function() {" +
                     "                window.location.reload();" +
-                    "            }, 500);" +
-                    "        } else {" +
-                    "            indicator.style.top = '-50px';" +
-                    "        }" +
-                    "    }, {passive: true});" +
+                    "            }" +
+                    "        });" +
+                    "    }" +
                     "})();";
 
                 view.evaluateJavascript(combinedScript, null);
@@ -450,6 +392,24 @@ public class MainActivity extends AppCompatActivity {
             appConfigJsContent = sb.toString();
         } catch (Exception e) {
             appConfigJsContent = "const AppConfig = { refresh: true };";
+        }
+    }
+
+    // Pomoćna metoda za čitanje pulltorefresh.js iz assets foldera
+    private void loadPullToRefreshJs() {
+        try {
+            AssetManager assetManager = getAssets();
+            InputStream is = assetManager.open("pulltorefresh.js");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            reader.close();
+            pullToRefreshJsContent = sb.toString();
+        } catch (Exception e) {
+            pullToRefreshJsContent = "";
         }
     }
 
